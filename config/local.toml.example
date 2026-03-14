@@ -1,0 +1,20 @@
+[scan]
+source = "/music/source"
+db = "/workspace/state.db"
+
+[plan]
+library_root = "D:/YourMusicLibrary"
+db = "/workspace/state.db"
+
+[apply]
+db = "/workspace/state.db"
+dry_run = true
+
+[rollback]
+db = "/workspace/state.db"
+dry_run = true
+
+[verify]
+db = "/workspace/state.db"
+
+# scan_run_id is intentionally not stored here because it changes per run.

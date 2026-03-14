@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.egg-info/
+
+config/local.toml
+docker-compose.override.yml
+state.db
+D:\\Music\\*

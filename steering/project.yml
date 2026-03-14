@@ -1,0 +1,12 @@
+# MUSUBI Project Configuration
+name: music_folder_builder
+description: 音楽ファイルのメタデータに合わせてフォルダ管理するツール
+locale: ja
+version: "0.1.0"
+created: 2026-03-14
+
+# Technology Stack
+tech_stack:
+  approach: single
+  languages:
+    - python

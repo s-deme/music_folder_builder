@@ -1,0 +1,4 @@
+services:
+  musubi:
+    volumes:
+      - /path/to/your/music/source:/music:ro
