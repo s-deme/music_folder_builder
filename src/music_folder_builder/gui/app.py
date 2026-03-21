@@ -153,6 +153,7 @@ class MusicFolderBuilderApp:
         self._operation_log_tree: ttk.Treeview
         self._rollback_log_tree: ttk.Treeview
         self._verify_log_tree: ttk.Treeview
+        self._choose_target_button: ttk.Button
         self._progress_bar: ttk.Progressbar
         self._filename_template_entry: ttk.Entry
         self._tree_sort_state: dict[str, tuple[str, bool]] = {}
@@ -445,8 +446,7 @@ class MusicFolderBuilderApp:
 
     def _build_plan_tab(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(0, weight=1)
-        parent.rowconfigure(2, weight=1)
-        parent.rowconfigure(3, weight=6)
+        parent.rowconfigure(3, weight=1)
         self._add_tab_caption(parent, "整理後にどこへ置かれるかを確認するタブです。ここで内容を見てから整理を実行してください。")
 
         controls = ttk.LabelFrame(parent, text="整理予定を作る", padding=10)
@@ -484,6 +484,7 @@ class MusicFolderBuilderApp:
             parent,
             row=2,
             spec=RunTreeSpec("整理予定の履歴", "予定件数", "注意件数", "元の読み取り結果"),
+            height=5,
         )
         self._plan_tree.bind("<<TreeviewSelect>>", self._on_plan_tree_selected)
 
@@ -493,10 +494,17 @@ class MusicFolderBuilderApp:
         items_panel.rowconfigure(1, weight=1)
         pager = ttk.Frame(items_panel)
         pager.grid(row=0, column=0, sticky="ew", pady=(0, 6))
-        pager.columnconfigure(1, weight=1)
+        pager.columnconfigure(3, weight=1)
         ttk.Button(pager, text="前へ", command=lambda: self._change_plan_items_page(-1)).grid(row=0, column=0)
-        ttk.Label(pager, textvariable=self._plan_items_page_var).grid(row=0, column=1, sticky="e", padx=8)
+        ttk.Label(pager, textvariable=self._plan_items_page_var).grid(row=0, column=1, sticky="w", padx=8)
         ttk.Button(pager, text="次へ", command=lambda: self._change_plan_items_page(1)).grid(row=0, column=2)
+        self._choose_target_button = ttk.Button(pager, text="選択中の項目の候補先を選ぶ", command=self._choose_plan_item_target)
+        self._choose_target_button.grid(row=0, column=4, sticky="e")
+        self._choose_target_button.state(["disabled"])
+        ToolTip(
+            self._choose_target_button,
+            "整理後一覧で選んだ companion 画像について、候補先を選んで plan を確定します。",
+        )
         self._plan_items_tree = self._create_scrolled_tree(
             items_panel,
             row=1,
@@ -514,6 +522,7 @@ class MusicFolderBuilderApp:
                 "reason": 420,
             },
         )
+        self._plan_items_tree.bind("<<TreeviewSelect>>", self._on_plan_items_tree_selected)
         ToolTip(self._plan_items_tree, "この一覧が一番重要です。整理後にどこへ移るかをここで確認します。")
 
     def _build_apply_tab(self, parent: ttk.Frame) -> None:
@@ -692,7 +701,7 @@ class MusicFolderBuilderApp:
     def _add_tab_caption(self, parent: ttk.Frame, text: str) -> None:
         ttk.Label(parent, text=text).grid(row=0, column=0, sticky="w")
 
-    def _create_run_tree(self, parent: ttk.Frame, *, row: int, spec: RunTreeSpec) -> ttk.Treeview:
+    def _create_run_tree(self, parent: ttk.Frame, *, row: int, spec: RunTreeSpec, height: int | None = None) -> ttk.Treeview:
         panel = ttk.LabelFrame(parent, text=spec.title, padding=6)
         panel.grid(row=row, column=0, sticky="nsew", pady=(0, 0))
         panel.columnconfigure(0, weight=1)
@@ -720,6 +729,7 @@ class MusicFolderBuilderApp:
                 "secondary": 110,
                 "detail": 420,
             },
+            height=height,
         )
 
     def _create_log_tree(self, parent: ttk.Frame) -> ttk.Treeview:
@@ -811,10 +821,14 @@ class MusicFolderBuilderApp:
         columns: tuple[str, ...],
         headings: dict[str, str],
         widths: dict[str, int],
+        height: int | None = None,
     ) -> ttk.Treeview:
         parent.columnconfigure(0, weight=1)
         parent.rowconfigure(row, weight=1)
-        tree = ttk.Treeview(parent, columns=columns, show="headings")
+        options: dict[str, object] = {"columns": columns, "show": "headings"}
+        if height is not None:
+            options["height"] = height
+        tree = ttk.Treeview(parent, **options)
         for key in columns:
             tree.heading(key, text=headings[key], command=lambda column=key, current_tree=tree: self._sort_tree(current_tree, column))
             tree.column(key, width=widths.get(key, 140), anchor="w")
@@ -911,6 +925,7 @@ class MusicFolderBuilderApp:
         db_path = self._db_path()
         self._clear_tree(self._plan_tree)
         self._clear_tree(self._plan_items_tree)
+        self._update_plan_item_actions_state()
         if db_path is None:
             self._plan_items_paging = PagingState()
             self._plan_items_page_var.set("")
@@ -1045,6 +1060,7 @@ class MusicFolderBuilderApp:
     def _refresh_plan_preview(self, plan_run_id: str) -> None:
         db_path = self._db_path()
         self._clear_tree(self._plan_items_tree)
+        self._update_plan_item_actions_state()
         if db_path is None or not plan_run_id:
             self._plan_items_paging = PagingState()
             self._plan_items_page_var.set("")
@@ -1061,6 +1077,7 @@ class MusicFolderBuilderApp:
             self._plan_items_tree.insert(
                 "",
                 "end",
+                iid=row.plan_item_id,
                 values=(
                     row.source_path,
                     row.target_path or "",
@@ -1069,10 +1086,81 @@ class MusicFolderBuilderApp:
                 ),
             )
         self._plan_items_page_var.set(self._format_page_text(self._plan_items_paging))
+        self._update_plan_item_actions_state()
 
     def _refresh_selected_plan_preview(self) -> None:
         self._plan_items_paging.offset = 0
         self._refresh_plan_preview(self._get_selected_tree_run_id(self._plan_tree))
+
+    def _choose_plan_item_target(self) -> None:
+        plan_item_id = self._get_selected_plan_item_id()
+        if not plan_item_id:
+            self._show_info("Selection Required", "候補先を選びたい整理項目を一覧から選んでください。")
+            return
+        db_path = self._db_path()
+        if db_path is None:
+            return
+        query_service = GuiQueryService(db_path)
+        candidates = query_service.list_plan_item_target_candidates(plan_item_id=plan_item_id)
+        if not candidates:
+            self._show_info(
+                "No Candidates",
+                "この項目には選択可能な候補先がありません。『整理先フォルダを一意に決められない』の項目を選んでください。",
+            )
+            return
+        self._open_plan_item_target_picker(
+            db_path=db_path,
+            plan_item_id=plan_item_id,
+            candidates=[item.target_path for item in candidates],
+        )
+
+    def _open_plan_item_target_picker(self, *, db_path: Path, plan_item_id: str, candidates: list[str]) -> None:
+        dialog = tk.Toplevel(self._root)
+        dialog.title("候補先を選択")
+        dialog.transient(self._root)
+        dialog.grab_set()
+        dialog.geometry("980x360")
+        dialog.columnconfigure(0, weight=1)
+        dialog.rowconfigure(1, weight=1)
+
+        ttk.Label(
+            dialog,
+            text="この companion 画像をどこへ整理するか選んでください。選択後は plan item を更新します。",
+        ).grid(row=0, column=0, sticky="w", padx=12, pady=(12, 8))
+
+        list_frame = ttk.Frame(dialog)
+        list_frame.grid(row=1, column=0, sticky="nsew", padx=12)
+        list_frame.columnconfigure(0, weight=1)
+        list_frame.rowconfigure(0, weight=1)
+        listbox = tk.Listbox(list_frame, exportselection=False)
+        listbox.grid(row=0, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=listbox.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        listbox.configure(yscrollcommand=scrollbar.set)
+        for candidate in candidates:
+            listbox.insert("end", candidate)
+        listbox.selection_set(0)
+
+        buttons = ttk.Frame(dialog)
+        buttons.grid(row=2, column=0, sticky="e", padx=12, pady=12)
+
+        def apply_selection() -> None:
+            selection = listbox.curselection()
+            if not selection:
+                self._show_info("Selection Required", "候補先を 1 つ選んでください。")
+                return
+            target_path = candidates[selection[0]]
+            GuiQueryService(db_path).assign_plan_item_target(plan_item_id=plan_item_id, target_path=target_path)
+            dialog.destroy()
+            selected_plan_id = self._get_selected_tree_run_id(self._plan_tree)
+            self._refresh_plan_views()
+            if selected_plan_id:
+                self._plan_items_paging.offset = 0
+                self._refresh_plan_preview(selected_plan_id)
+
+        ttk.Button(buttons, text="キャンセル", command=dialog.destroy).pack(side="right")
+        ttk.Button(buttons, text="この候補先を使う", command=apply_selection).pack(side="right", padx=(0, 8))
+        listbox.focus_set()
 
     def _list_visible_plan_items(
         self,
@@ -1238,6 +1326,9 @@ class MusicFolderBuilderApp:
         self._sync_choice_from_tree(self._plan_tree, self._plan_choice_map, self._apply_plan_choice_var)
         self._refresh_plan_preview(run_id)
 
+    def _on_plan_items_tree_selected(self, _: object) -> None:
+        self._update_plan_item_actions_state()
+
     def _on_execution_tree_selected(self, _: object) -> None:
         run_id = self._get_selected_tree_run_id(self._execution_tree)
         if not run_id:
@@ -1293,6 +1384,18 @@ class MusicFolderBuilderApp:
     def _get_selected_tree_run_id(self, tree: ttk.Treeview) -> str:
         selection = tree.selection()
         return selection[0] if selection else ""
+
+    def _get_selected_plan_item_id(self) -> str:
+        selection = self._plan_items_tree.selection()
+        return selection[0] if selection else ""
+
+    def _update_plan_item_actions_state(self) -> None:
+        if not hasattr(self, "_choose_target_button"):
+            return
+        if self._get_selected_plan_item_id():
+            self._choose_target_button.state(["!disabled"])
+            return
+        self._choose_target_button.state(["disabled"])
 
     def _start_scan(self) -> None:
         source_root = self._required_path(self._source_var.get(), "Source")

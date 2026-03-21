@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from pathlib import PureWindowsPath
 
+from music_folder_builder.domain.policies.path_policy import PathPolicy
+from music_folder_builder.domain.policies.path_sanitization import PathSanitizer
 from music_folder_builder.infrastructure.db.connection import connect_sqlite
 from music_folder_builder.infrastructure.db.schema import initialize_schema
 
@@ -64,11 +67,18 @@ class ActiveProgress:
     detail: str
 
 
+@dataclass(frozen=True, slots=True)
+class PlanItemTargetCandidate:
+    target_path: str
+
+
 class GuiQueryService:
     _COMPANION_IMAGE_EXTENSIONS = (".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp")
 
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = Path(db_path)
+        self._sanitizer = PathSanitizer()
+        self._path_policy = PathPolicy()
 
     def list_scan_runs(self, *, limit: int = 20) -> list[RunRow]:
         rows = self._fetchall(
@@ -469,6 +479,100 @@ class GuiQueryService:
             self._delete_verify_run(connection, verify_run_id=verify_run_id)
             connection.commit()
 
+    def list_plan_item_target_candidates(self, *, plan_item_id: str) -> list[PlanItemTargetCandidate]:
+        with connect_sqlite(self._db_path) as connection:
+            initialize_schema(connection)
+            plan_item = connection.execute(
+                """
+                SELECT
+                    p.plan_run_id,
+                    p.reason,
+                    f.source_path,
+                    f.source_root
+                FROM plan_items AS p
+                JOIN scanned_files AS f ON f.id = p.file_id
+                WHERE p.id = ?
+                """,
+                (plan_item_id,),
+            ).fetchone()
+            if plan_item is None or plan_item["reason"] != "companion_target_ambiguous":
+                return []
+            candidates = self._compute_companion_candidates(
+                connection,
+                plan_run_id=plan_item["plan_run_id"],
+                source_path=plan_item["source_path"],
+                source_root=plan_item["source_root"],
+            )
+            return [PlanItemTargetCandidate(target_path=path) for path in candidates]
+
+    def assign_plan_item_target(self, *, plan_item_id: str, target_path: str) -> None:
+        with connect_sqlite(self._db_path) as connection:
+            initialize_schema(connection)
+            plan_item = connection.execute(
+                "SELECT plan_run_id FROM plan_items WHERE id = ?",
+                (plan_item_id,),
+            ).fetchone()
+            if plan_item is None:
+                raise ValueError("plan item not found")
+
+            sanitized_path = str(self._sanitizer.sanitize_path(PureWindowsPath(target_path)))
+            risk = self._path_policy.assess(PureWindowsPath(sanitized_path))
+            duplicate_row = connection.execute(
+                """
+                SELECT 1
+                FROM plan_items
+                WHERE plan_run_id = ?
+                  AND id != ?
+                  AND target_path_sanitized = ?
+                LIMIT 1
+                """,
+                (plan_item["plan_run_id"], plan_item_id, sanitized_path),
+            ).fetchone()
+            if duplicate_row is not None:
+                connection.execute(
+                    """
+                    UPDATE plan_items
+                    SET action = 'skip',
+                        target_path = ?,
+                        target_path_sanitized = ?,
+                        conflict_status = 'duplicate_target',
+                        risk_status = 'none',
+                        reason = 'duplicate_target_path'
+                    WHERE id = ?
+                    """,
+                    (target_path, sanitized_path, plan_item_id),
+                )
+            elif risk.status != "none":
+                connection.execute(
+                    """
+                    UPDATE plan_items
+                    SET action = 'skip',
+                        target_path = ?,
+                        target_path_sanitized = ?,
+                        conflict_status = 'none',
+                        risk_status = ?,
+                        reason = ?
+                    WHERE id = ?
+                    """,
+                    (target_path, sanitized_path, risk.status, risk.reason, plan_item_id),
+                )
+            else:
+                connection.execute(
+                    """
+                    UPDATE plan_items
+                    SET action = 'move',
+                        target_path = ?,
+                        target_path_sanitized = ?,
+                        conflict_status = 'none',
+                        risk_status = 'none',
+                        reason = NULL
+                    WHERE id = ?
+                    """,
+                    (target_path, sanitized_path, plan_item_id),
+                )
+            self._refresh_plan_run_counts(connection, plan_run_id=plan_item["plan_run_id"])
+            connection.commit()
+
     def _find_active_plan_progress(self) -> ActiveProgress | None:
         row = self._fetchone(
             """
@@ -617,6 +721,106 @@ class GuiQueryService:
             initialize_schema(connection)
             row = connection.execute(query, params).fetchone()
         return None if row is None else dict(row)
+
+    def _compute_companion_candidates(
+        self,
+        connection: object,
+        *,
+        plan_run_id: str,
+        source_path: str,
+        source_root: str,
+    ) -> list[str]:
+        music_rows = connection.execute(
+            """
+            SELECT
+                f.source_path,
+                f.source_root,
+                p.target_path_sanitized
+            FROM plan_items AS p
+            JOIN scanned_files AS f ON f.id = p.file_id
+            WHERE p.plan_run_id = ?
+              AND f.file_type = 'music'
+              AND p.action = 'move'
+              AND p.target_path_sanitized IS NOT NULL
+            ORDER BY f.source_path
+            """,
+            (plan_run_id,),
+        ).fetchall()
+        source_dir_targets: dict[str, set[str]] = {}
+        for row in music_rows:
+            self._register_source_dir_targets(
+                source_dir_targets=source_dir_targets,
+                source_path=PureWindowsPath(row["source_path"]),
+                source_root=PureWindowsPath(row["source_root"]),
+                target_path=PureWindowsPath(row["target_path_sanitized"]),
+            )
+
+        anchor = self._resolve_companion_anchor(
+            asset_path=PureWindowsPath(source_path),
+            source_root=PureWindowsPath(source_root),
+            source_dir_targets=source_dir_targets,
+        )
+        if anchor is None:
+            return []
+        relative_path = PureWindowsPath(source_path).relative_to(anchor)
+        return sorted(str(PureWindowsPath(target_dir) / relative_path) for target_dir in source_dir_targets[str(anchor)])
+
+    def _refresh_plan_run_counts(self, connection: object, *, plan_run_id: str) -> None:
+        conflict_count = connection.execute(
+            "SELECT COUNT(*) AS count FROM plan_items WHERE plan_run_id = ? AND conflict_status != 'none'",
+            (plan_run_id,),
+        ).fetchone()["count"]
+        risk_count = connection.execute(
+            "SELECT COUNT(*) AS count FROM plan_items WHERE plan_run_id = ? AND risk_status != 'none'",
+            (plan_run_id,),
+        ).fetchone()["count"]
+        connection.execute(
+            """
+            UPDATE plan_runs
+            SET conflict_count = ?, risk_count = ?
+            WHERE id = ?
+            """,
+            (conflict_count, risk_count, plan_run_id),
+        )
+
+    def _register_source_dir_targets(
+        self,
+        *,
+        source_dir_targets: dict[str, set[str]],
+        source_path: PureWindowsPath,
+        source_root: PureWindowsPath,
+        target_path: PureWindowsPath,
+    ) -> None:
+        current_source = source_path.parent
+        current_target = target_path.parent
+        while True:
+            source_dir_targets.setdefault(str(current_source), set()).add(str(current_target))
+            if current_source == source_root:
+                return
+            parent_source = current_source.parent
+            parent_target = current_target.parent
+            if parent_source == current_source or parent_target == current_target:
+                return
+            current_source = parent_source
+            current_target = parent_target
+
+    def _resolve_companion_anchor(
+        self,
+        *,
+        asset_path: PureWindowsPath,
+        source_root: PureWindowsPath,
+        source_dir_targets: dict[str, set[str]],
+    ) -> PureWindowsPath | None:
+        current = asset_path.parent
+        while True:
+            if str(current) in source_dir_targets:
+                return current
+            if current == source_root:
+                return None
+            parent = current.parent
+            if parent == current:
+                return None
+            current = parent
 
     def _delete_plan_run(self, connection: object, *, plan_run_id: str) -> None:
         execution_rows = connection.execute(

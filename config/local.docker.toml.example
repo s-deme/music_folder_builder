@@ -1,0 +1,30 @@
+[scan]
+source = "/music/source_library"
+db = "/workspace/state.db"
+
+[plan]
+library_root = "D:/Path/To/OrganizedLibrary"
+db = "/workspace/state.db"
+
+[apply]
+db = "/workspace/state.db"
+dry_run = true
+
+[rollback]
+db = "/workspace/state.db"
+dry_run = true
+
+[verify]
+db = "/workspace/state.db"
+
+[display]
+timezone = "Asia/Tokyo"
+
+[naming]
+artist_dir_template = "{album_artist}"
+album_dir_template = "{album}"
+disc_dir_template = "[{disc_no:02d}]"
+filename_template = "[{track_no:02d}_]{title}{extension}"
+use_source_filename = false
+
+# scan_run_id is intentionally not stored here because it changes per run.

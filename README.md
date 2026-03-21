@@ -16,17 +16,18 @@
 
 ## 必要なもの
 
-- Docker
-- Docker Compose
-- GUI を使う場合は、ホスト側で GUI 表示が使えること
+- Docker Desktop / Docker Compose
+- GUI を使う場合: ホスト側で GUI 表示が使えること
 
 ## 最初の準備
+
+`config/local.toml` はローカル専用ファイルです。Docker 用サンプルから作ってください。
 
 1. 設定ファイルを作ります。
 
 ```bash
 mkdir -p config
-cp config/local.toml.example config/local.toml
+cp config/local.docker.toml.example config/local.toml
 ```
 
 2. `config/local.toml` を編集します。
@@ -35,11 +36,11 @@ cp config/local.toml.example config/local.toml
 
 ```toml
 [scan]
-source = "/music/source"
+source = "/music/source_library"
 db = "/workspace/state.db"
 
 [plan]
-library_root = "D:/YourMusicLibrary"
+library_root = "D:/Path/To/OrganizedLibrary"
 db = "/workspace/state.db"
 
 [apply]
@@ -76,23 +77,26 @@ services:
     environment:
       - DISPLAY=${DISPLAY}
     volumes:
-      - /path/to/your/music/source:/music:ro
+      - /path/to/your/music/source_library:/music/source_library:ro
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
 ```
 
-`/path/to/your/music/source` は実際の音楽フォルダに置き換えてください。  
-これでコンテナ内から `/music` として見えるようになります。
+`/path/to/your/music/source_library` は実際の音楽フォルダに置き換えてください。
+この例ではコンテナ内から `/music/source_library` として見えるようになります。
 
-## 起動
+## コンテナを開く
 
 ```bash
 docker compose build
 docker compose run --rm app
 ```
 
+`docker compose run --rm app` を実行すると、コンテナ内のシェルを開けます。
+以降の GUI / CLI コマンドはその中で実行します。
+
 ## GUI を使う
 
-コンテナ内で:
+コンテナ内で次を実行します。
 
 ```bash
 python -m music_folder_builder.gui
@@ -123,10 +127,11 @@ GUI は次の順に使います。
 - 時刻表示は既定で JST です。必要なら `display.timezone` を変えてください。
 - 命名テンプレートでは `{track_no:02d}` のようなパディング指定と `[{track_no:02d}_]` のような条件付き表示が使えます。
 - 元のファイル名をそのまま使いたい場合は、GUI の `フォルダ名・ファイル名` タブで設定できます。
+- `display` や `naming` を含む設定例は `config/local.docker.toml.example` に入っています。
 
 ## コマンドラインで使う
 
-GUI を使わずに CLI でも実行できます。
+GUI を使わずに CLI でも実行できます。以下もコンテナ内で実行します。
 
 ```bash
 python -m music_folder_builder scan
@@ -158,7 +163,7 @@ python -m music_folder_builder verify --rollback-run-id <ROLLBACK_RUN_ID>
 
 - `apply` や `rollback` の前に dry-run を試すのを推奨します。
 - `verify` は実行後の状態確認です。できるだけ毎回行ってください。
-- 命名規則そのものを GUI から編集する機能はまだありません。
+- 命名規則を変更した場合は、`2. 整理予定` を作り直して結果を確認してください。
 
 ## 開発者向け
 
