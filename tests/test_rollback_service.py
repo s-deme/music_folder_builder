@@ -281,6 +281,52 @@ class RollbackServiceTests(unittest.TestCase):
                 self.assertEqual("skipped", log_row["result"])
                 self.assertEqual("already_rolled_back", log_row["error_message"])
 
+    def test_rollback_dry_run_does_not_block_following_real_rollback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "state.db"
+            source_file = Path(tmp_dir) / "source.flac"
+            target_file = Path(tmp_dir) / "target.flac"
+            target_file.write_bytes(b"music")
+            self._seed_same_volume_only_history(db_path, source_file, target_file)
+
+            service = RollbackService(file_mutation_gateway=FileMutationGateway())
+            dry_run_result = service.execute(
+                RollbackRequest(
+                    db_path=db_path,
+                    execution_run_id="execution-1",
+                    dry_run=True,
+                )
+            )
+            self.assertEqual(1, dry_run_result.success_count)
+            self.assertTrue(target_file.exists())
+            self.assertFalse(source_file.exists())
+
+            real_result = service.execute(
+                RollbackRequest(
+                    db_path=db_path,
+                    execution_run_id="execution-1",
+                    dry_run=False,
+                )
+            )
+
+            self.assertEqual(1, real_result.success_count)
+            self.assertEqual(0, real_result.skipped_count)
+            self.assertTrue(source_file.exists())
+            self.assertFalse(target_file.exists())
+
+            with connect_sqlite(db_path) as connection:
+                log_row = connection.execute(
+                    """
+                    SELECT performed_action, result, error_message
+                    FROM rollback_logs
+                    WHERE rollback_run_id = ?
+                    """,
+                    (real_result.rollback_run_id,),
+                ).fetchone()
+                self.assertEqual("reverse_move", log_row["performed_action"])
+                self.assertEqual("success", log_row["result"])
+                self.assertIsNone(log_row["error_message"])
+
     @staticmethod
     def _seed_apply_history(db_path: Path, source_file: Path, target_file: Path) -> None:
         with connect_sqlite(db_path) as connection:

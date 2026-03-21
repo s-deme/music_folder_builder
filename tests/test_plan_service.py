@@ -4,6 +4,7 @@ from pathlib import Path
 
 from music_folder_builder.application.dto.plan_request import PlanRequest
 from music_folder_builder.application.services.plan_service import PlanService
+from music_folder_builder.domain.policies.organization_rules import OrganizationRules
 from music_folder_builder.application.services.scan_service import ScanService
 from music_folder_builder.infrastructure.db.connection import connect_sqlite
 from music_folder_builder.infrastructure.metadata.reader import MetadataReadResult
@@ -200,6 +201,169 @@ class PlanServiceTests(unittest.TestCase):
                     (result.plan_run_id,),
                 ).fetchone()
                 self.assertEqual(r"D:\Music\Album Artist\Album\01\Song.flac", item_row["target_path_sanitized"])
+
+    def test_plan_supports_custom_folder_and_filename_templates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "library"
+            root.mkdir()
+            (root / "track01.flac").write_bytes(b"music")
+            db_path = Path(tmp_dir) / "state.db"
+
+            scan_service = ScanService(
+                metadata_reader=PlanMetadataReader(
+                    {
+                        "track01.flac": {
+                            "artist": "Artist",
+                            "album_artist": "Album Artist",
+                            "album": "Album",
+                            "title": "Song",
+                            "track_no": 7,
+                            "disc_no": 2,
+                        }
+                    }
+                )
+            )
+            scan_result = scan_service.execute(request=self._scan_request(root, db_path))
+
+            service = PlanService(
+                organization_rules=OrganizationRules(
+                    artist_dir_template="{artist}",
+                    album_dir_template="[{disc_no:02d}-]{album}",
+                    disc_dir_template="",
+                    filename_template="{track_no:03d}-{title}{extension}",
+                )
+            )
+            result = service.execute(
+                PlanRequest(db_path=db_path, scan_run_id=scan_result.scan_run_id, library_root=Path("D:/Music"))
+            )
+
+            with connect_sqlite(db_path) as connection:
+                item_row = connection.execute(
+                    "SELECT target_path_sanitized FROM plan_items WHERE plan_run_id = ?",
+                    (result.plan_run_id,),
+                ).fetchone()
+                self.assertEqual(r"D:\Music\Artist\02-Album\007-Song.flac", item_row["target_path_sanitized"])
+
+    def test_plan_can_keep_source_filename(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "library"
+            root.mkdir()
+            (root / "track01.original.flac").write_bytes(b"music")
+            db_path = Path(tmp_dir) / "state.db"
+
+            scan_service = ScanService(
+                metadata_reader=PlanMetadataReader(
+                    {
+                        "track01.original.flac": {
+                            "artist": "Artist",
+                            "album_artist": "Album Artist",
+                            "album": "Album",
+                            "title": "Song",
+                            "track_no": 7,
+                            "disc_no": 2,
+                        }
+                    }
+                )
+            )
+            scan_result = scan_service.execute(request=self._scan_request(root, db_path))
+
+            service = PlanService(
+                organization_rules=OrganizationRules(
+                    artist_dir_template="{artist}",
+                    album_dir_template="{album}",
+                    disc_dir_template="",
+                    filename_template="{source_stem}{extension}",
+                )
+            )
+            result = service.execute(
+                PlanRequest(db_path=db_path, scan_run_id=scan_result.scan_run_id, library_root=Path("D:/Music"))
+            )
+
+            with connect_sqlite(db_path) as connection:
+                item_row = connection.execute(
+                    "SELECT target_path_sanitized FROM plan_items WHERE plan_run_id = ?",
+                    (result.plan_run_id,),
+                ).fetchone()
+                self.assertEqual(
+                    r"D:\Music\Artist\Album\track01.original.flac",
+                    item_row["target_path_sanitized"],
+                )
+
+    def test_plan_includes_companion_images_in_same_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "library"
+            root.mkdir()
+            (root / "track01.flac").write_bytes(b"music")
+            (root / "cover.jpg").write_bytes(b"image")
+            db_path = Path(tmp_dir) / "state.db"
+
+            scan_service = ScanService(
+                metadata_reader=PlanMetadataReader(
+                    {"track01.flac": {"title": "Song", "track_no": 1, "disc_no": 1}}
+                )
+            )
+            scan_result = scan_service.execute(request=self._scan_request(root, db_path))
+
+            service = PlanService()
+            result = service.execute(
+                PlanRequest(db_path=db_path, scan_run_id=scan_result.scan_run_id, library_root=Path("D:/Music"))
+            )
+
+            self.assertEqual(2, result.item_count)
+
+            with connect_sqlite(db_path) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT f.source_path, p.action, p.target_path_sanitized
+                    FROM plan_items AS p
+                    JOIN scanned_files AS f ON f.id = p.file_id
+                    WHERE p.plan_run_id = ?
+                    ORDER BY f.source_path
+                    """,
+                    (result.plan_run_id,),
+                ).fetchall()
+                self.assertEqual(2, len(rows))
+                self.assertEqual(str(root / "cover.jpg"), rows[0]["source_path"])
+                self.assertEqual("move", rows[0]["action"])
+                self.assertEqual(r"D:\Music\Album Artist\Album\01\cover.jpg", rows[0]["target_path_sanitized"])
+                self.assertEqual(str(root / "track01.flac"), rows[1]["source_path"])
+
+    def test_plan_includes_companion_images_in_subfolder_with_relative_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "library"
+            scans_dir = root / "Scans" / "original"
+            scans_dir.mkdir(parents=True)
+            (root / "track01.flac").write_bytes(b"music")
+            (scans_dir / "cover.jpg").write_bytes(b"image")
+            db_path = Path(tmp_dir) / "state.db"
+
+            scan_service = ScanService(
+                metadata_reader=PlanMetadataReader(
+                    {"track01.flac": {"title": "Song", "track_no": 1, "disc_no": 1}}
+                )
+            )
+            scan_result = scan_service.execute(request=self._scan_request(root, db_path))
+
+            service = PlanService()
+            result = service.execute(
+                PlanRequest(db_path=db_path, scan_run_id=scan_result.scan_run_id, library_root=Path("D:/Music"))
+            )
+
+            with connect_sqlite(db_path) as connection:
+                row = connection.execute(
+                    """
+                    SELECT p.action, p.target_path_sanitized
+                    FROM plan_items AS p
+                    JOIN scanned_files AS f ON f.id = p.file_id
+                    WHERE p.plan_run_id = ? AND f.source_path = ?
+                    """,
+                    (result.plan_run_id, str(scans_dir / "cover.jpg")),
+                ).fetchone()
+                self.assertEqual("move", row["action"])
+                self.assertEqual(
+                    r"D:\Music\Album Artist\Album\01\Scans\original\cover.jpg",
+                    row["target_path_sanitized"],
+                )
 
     @staticmethod
     def _scan_request(source_root: Path, db_path: Path):

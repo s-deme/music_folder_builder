@@ -15,8 +15,16 @@ from music_folder_builder.infrastructure.fs.state_gateway import FileStateGatewa
 
 
 class VerifyService:
-    def __init__(self, *, file_state_gateway: FileStateGateway | None = None) -> None:
+    _DEFAULT_BATCH_SIZE = 500
+
+    def __init__(
+        self,
+        *,
+        file_state_gateway: FileStateGateway | None = None,
+        batch_size: int = _DEFAULT_BATCH_SIZE,
+    ) -> None:
         self._file_state_gateway = file_state_gateway or FileStateGateway()
+        self._batch_size = batch_size
 
     def execute(self, request: VerifyRequest) -> VerifyResult:
         verify_run_id = str(uuid4())
@@ -42,6 +50,7 @@ class VerifyService:
                 started_at=_utc_now(),
             )
 
+            verify_log_rows: list[tuple[object, ...]] = []
             if request.execution_run_id:
                 items = apply_verify_repository.fetch_apply_verify_items(
                     execution_run_id=request.execution_run_id
@@ -80,20 +89,21 @@ class VerifyService:
                         failed_count += 1
                         result = "failed"
                         error_message = "apply_expectation_mismatch"
-                    verify_log_repository.insert_verify_log(
-                        verify_log_id=str(uuid4()),
-                        verify_run_id=verify_run_id,
-                        operation_log_id=item.operation_log_id,
-                        rollback_log_id=None,
-                        sequence_no=item.sequence_no,
-                        subject_path=item.target_path,
-                        counterpart_path=item.source_path,
-                        expected_state=item.expected_state,
-                        actual_state=actual_state,
-                        result=result,
-                        error_message=error_message,
-                        created_at=_utc_now(),
+                    verify_log_rows.append(
+                        _verify_log_row(
+                            verify_run_id=verify_run_id,
+                            operation_log_id=item.operation_log_id,
+                            rollback_log_id=None,
+                            sequence_no=item.sequence_no,
+                            subject_path=item.target_path,
+                            counterpart_path=item.source_path,
+                            expected_state=item.expected_state,
+                            actual_state=actual_state,
+                            result=result,
+                            error_message=error_message,
+                        )
                     )
+                    self._flush_verify_log_batch(connection, verify_log_repository, verify_log_rows)
             else:
                 items = rollback_verify_repository.fetch_rollback_verify_items(
                     rollback_run_id=request.rollback_run_id or ""
@@ -132,20 +142,23 @@ class VerifyService:
                         failed_count += 1
                         result = "failed"
                         error_message = "rollback_expectation_mismatch"
-                    verify_log_repository.insert_verify_log(
-                        verify_log_id=str(uuid4()),
-                        verify_run_id=verify_run_id,
-                        operation_log_id=None,
-                        rollback_log_id=item.rollback_log_id,
-                        sequence_no=item.sequence_no,
-                        subject_path=item.source_path,
-                        counterpart_path=item.target_path,
-                        expected_state=item.expected_state,
-                        actual_state=actual_state,
-                        result=result,
-                        error_message=error_message,
-                        created_at=_utc_now(),
+                    verify_log_rows.append(
+                        _verify_log_row(
+                            verify_run_id=verify_run_id,
+                            operation_log_id=None,
+                            rollback_log_id=item.rollback_log_id,
+                            sequence_no=item.sequence_no,
+                            subject_path=item.source_path,
+                            counterpart_path=item.target_path,
+                            expected_state=item.expected_state,
+                            actual_state=actual_state,
+                            result=result,
+                            error_message=error_message,
+                        )
                     )
+                    self._flush_verify_log_batch(connection, verify_log_repository, verify_log_rows)
+
+            self._flush_verify_log_batch(connection, verify_log_repository, verify_log_rows, force=True)
 
             verify_run_repository.complete_verify_run(
                 verify_run_id=verify_run_id,
@@ -163,6 +176,22 @@ class VerifyService:
             failed_count=failed_count,
             risky_count=risky_count,
         )
+
+    def _flush_verify_log_batch(
+        self,
+        connection: object,
+        verify_log_repository: VerifyLogRepository,
+        rows: list[tuple[object, ...]],
+        *,
+        force: bool = False,
+    ) -> None:
+        if not rows:
+            return
+        if not force and len(rows) < self._batch_size:
+            return
+        verify_log_repository.insert_verify_logs_batch(rows=rows)
+        connection.commit()
+        rows.clear()
 
 
 def _read_sizes(
@@ -198,3 +227,32 @@ def _render_actual_state(
 
 def _utc_now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _verify_log_row(
+    *,
+    verify_run_id: str,
+    operation_log_id: str | None,
+    rollback_log_id: str | None,
+    sequence_no: int,
+    subject_path: str,
+    counterpart_path: str | None,
+    expected_state: str,
+    actual_state: str,
+    result: str,
+    error_message: str | None,
+) -> tuple[object, ...]:
+    return (
+        str(uuid4()),
+        verify_run_id,
+        operation_log_id,
+        rollback_log_id,
+        sequence_no,
+        subject_path,
+        counterpart_path,
+        expected_state,
+        actual_state,
+        result,
+        error_message,
+        _utc_now(),
+    )

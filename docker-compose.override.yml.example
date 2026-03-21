@@ -1,4 +1,7 @@
 services:
-  musubi:
+  app:
+    environment:
+      - DISPLAY=${DISPLAY}
     volumes:
       - /path/to/your/music/source:/music:ro
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw

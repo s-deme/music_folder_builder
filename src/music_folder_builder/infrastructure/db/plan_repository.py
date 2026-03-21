@@ -4,6 +4,13 @@ import sqlite3
 
 
 class PlanRepository:
+    _INSERT_PLAN_ITEM_SQL = """
+        INSERT INTO plan_items (
+            id, plan_run_id, file_id, action, target_path, target_path_sanitized,
+            conflict_status, risk_status, reason
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+
     def __init__(self, connection: sqlite3.Connection) -> None:
         self._connection = connection
 
@@ -20,23 +27,20 @@ class PlanRepository:
         risk_status: str,
         reason: str | None,
     ) -> None:
-        with self._connection:
-            self._connection.execute(
-                """
-                INSERT INTO plan_items (
-                    id, plan_run_id, file_id, action, target_path, target_path_sanitized,
-                    conflict_status, risk_status, reason
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    plan_item_id,
-                    plan_run_id,
-                    file_id,
-                    action,
-                    target_path,
-                    target_path_sanitized,
-                    conflict_status,
-                    risk_status,
-                    reason,
-                ),
-            )
+        self._connection.execute(
+            self._INSERT_PLAN_ITEM_SQL,
+            (
+                plan_item_id,
+                plan_run_id,
+                file_id,
+                action,
+                target_path,
+                target_path_sanitized,
+                conflict_status,
+                risk_status,
+                reason,
+            ),
+        )
+
+    def insert_plan_items_batch(self, *, rows: list[tuple[object, ...]]) -> None:
+        self._connection.executemany(self._INSERT_PLAN_ITEM_SQL, rows)

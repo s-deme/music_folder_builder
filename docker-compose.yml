@@ -1,5 +1,6 @@
 services:
-  musubi:
+  app:
+    image: music-folder-builder-app
     build:
       context: .
       dockerfile: Dockerfile

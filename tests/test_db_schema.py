@@ -54,6 +54,30 @@ class DatabaseSchemaTests(unittest.TestCase):
                 table_names,
             )
 
+    def test_initialize_schema_creates_indexes_for_delete_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "state.db"
+
+            with connect_sqlite(db_path) as connection:
+                initialize_schema(connection)
+                index_names = self._fetch_index_names(connection)
+
+            self.assertTrue(
+                {
+                    "idx_scanned_files_scan_run_id",
+                    "idx_scanned_metadata_file_id",
+                    "idx_plan_runs_scan_run_id",
+                    "idx_plan_items_plan_run_id",
+                    "idx_execution_runs_plan_run_id",
+                    "idx_operation_logs_execution_run_id",
+                    "idx_rollback_runs_execution_run_id",
+                    "idx_rollback_logs_rollback_run_id",
+                    "idx_verify_runs_execution_run_id",
+                    "idx_verify_runs_rollback_run_id",
+                    "idx_verify_logs_verify_run_id",
+                }.issubset(index_names)
+            )
+
     @staticmethod
     def _fetch_table_names(connection: sqlite3.Connection) -> set[str]:
         rows = connection.execute(
@@ -61,6 +85,17 @@ class DatabaseSchemaTests(unittest.TestCase):
             SELECT name
             FROM sqlite_master
             WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+            """
+        ).fetchall()
+        return {row[0] for row in rows}
+
+    @staticmethod
+    def _fetch_index_names(connection: sqlite3.Connection) -> set[str]:
+        rows = connection.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'index' AND name NOT LIKE 'sqlite_%'
             """
         ).fetchall()
         return {row[0] for row in rows}

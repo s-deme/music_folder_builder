@@ -12,9 +12,11 @@ RUN apt-get update \
         bash \
         ca-certificates \
         curl \
+        fonts-noto-cjk \
         git \
         python3 \
         python3-pip \
+        python3-tk \
         python3-venv \
         python-is-python3 \
     && rm -rf /var/lib/apt/lists/*

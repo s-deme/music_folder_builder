@@ -9,6 +9,7 @@ dependencies = [
 
 [project.scripts]
 music-folder-builder = "music_folder_builder.cli.main:main"
+music-folder-builder-gui = "music_folder_builder.gui.main:main"
 
 [project.optional-dependencies]
 dev = [

@@ -160,6 +160,22 @@ SCHEMA_STATEMENTS = (
       created_at TEXT NOT NULL
     )
     """,
+    "CREATE INDEX IF NOT EXISTS idx_scanned_files_scan_run_id ON scanned_files(scan_run_id)",
+    "CREATE INDEX IF NOT EXISTS idx_scanned_metadata_file_id ON scanned_metadata(file_id)",
+    "CREATE INDEX IF NOT EXISTS idx_plan_runs_scan_run_id ON plan_runs(scan_run_id)",
+    "CREATE INDEX IF NOT EXISTS idx_plan_items_plan_run_id ON plan_items(plan_run_id)",
+    "CREATE INDEX IF NOT EXISTS idx_plan_items_file_id ON plan_items(file_id)",
+    "CREATE INDEX IF NOT EXISTS idx_execution_runs_plan_run_id ON execution_runs(plan_run_id)",
+    "CREATE INDEX IF NOT EXISTS idx_operation_logs_execution_run_id ON operation_logs(execution_run_id)",
+    "CREATE INDEX IF NOT EXISTS idx_operation_logs_plan_item_id ON operation_logs(plan_item_id)",
+    "CREATE INDEX IF NOT EXISTS idx_rollback_runs_execution_run_id ON rollback_runs(execution_run_id)",
+    "CREATE INDEX IF NOT EXISTS idx_rollback_logs_rollback_run_id ON rollback_logs(rollback_run_id)",
+    "CREATE INDEX IF NOT EXISTS idx_rollback_logs_operation_log_id ON rollback_logs(operation_log_id)",
+    "CREATE INDEX IF NOT EXISTS idx_verify_runs_execution_run_id ON verify_runs(execution_run_id)",
+    "CREATE INDEX IF NOT EXISTS idx_verify_runs_rollback_run_id ON verify_runs(rollback_run_id)",
+    "CREATE INDEX IF NOT EXISTS idx_verify_logs_verify_run_id ON verify_logs(verify_run_id)",
+    "CREATE INDEX IF NOT EXISTS idx_verify_logs_operation_log_id ON verify_logs(operation_log_id)",
+    "CREATE INDEX IF NOT EXISTS idx_verify_logs_rollback_log_id ON verify_logs(rollback_log_id)",
 )
 
 

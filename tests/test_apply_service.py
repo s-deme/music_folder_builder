@@ -111,6 +111,56 @@ class ApplyServiceTests(unittest.TestCase):
                 self.assertEqual("skipped", operation_row["result"])
                 self.assertEqual("path_length_exceeded", operation_row["error_message"])
 
+    def test_dry_run_persists_skip_items_without_target_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "library"
+            root.mkdir()
+            (root / "track01.flac").write_bytes(b"music")
+            db_path = Path(tmp_dir) / "state.db"
+
+            _, plan_result = self._prepare_plan(root, db_path)
+            with connect_sqlite(db_path) as connection:
+                connection.execute(
+                    """
+                    UPDATE plan_items
+                    SET action = 'skip',
+                        target_path = NULL,
+                        target_path_sanitized = NULL,
+                        risk_status = 'companion_without_music',
+                        reason = 'companion_without_music'
+                    WHERE plan_run_id = ?
+                    """,
+                    (plan_result.plan_run_id,),
+                )
+                connection.commit()
+
+            service = ApplyService()
+            result = service.execute(
+                ApplyRequest(
+                    db_path=db_path,
+                    plan_run_id=plan_result.plan_run_id,
+                    dry_run=True,
+                )
+            )
+
+            self.assertEqual(0, result.success_count)
+            self.assertEqual(1, result.skipped_count)
+            self.assertEqual(0, result.failed_count)
+
+            with connect_sqlite(db_path) as connection:
+                operation_row = connection.execute(
+                    """
+                    SELECT performed_action, result, target_path, error_message
+                    FROM operation_logs
+                    WHERE execution_run_id = ?
+                    """,
+                    (result.execution_run_id,),
+                ).fetchone()
+                self.assertEqual("skip", operation_row["performed_action"])
+                self.assertEqual("skipped", operation_row["result"])
+                self.assertEqual("", operation_row["target_path"])
+                self.assertEqual("companion_without_music", operation_row["error_message"])
+
     def test_apply_moves_file_on_same_volume(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "library"
@@ -146,6 +196,69 @@ class ApplyServiceTests(unittest.TestCase):
                 self.assertEqual("move", operation_row["performed_action"])
                 self.assertEqual("success", operation_row["result"])
                 self.assertEqual(1, operation_row["source_deleted"])
+
+    def test_apply_moves_companion_images_with_music(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "library"
+            root.mkdir()
+            source_file = root / "track01.flac"
+            cover_file = root / "cover.jpg"
+            source_file.write_bytes(b"music")
+            cover_file.write_bytes(b"image")
+            db_path = Path(tmp_dir) / "state.db"
+
+            library_root = Path(tmp_dir) / "organized"
+            _, plan_result = self._prepare_plan(root, db_path, library_root=library_root)
+
+            service = ApplyService(file_mutation_gateway=FileMutationGateway())
+            result = service.execute(
+                ApplyRequest(
+                    db_path=db_path,
+                    plan_run_id=plan_result.plan_run_id,
+                    dry_run=False,
+                )
+            )
+
+            target_music = library_root / "Album Artist" / "Album" / "01_track01.flac"
+            target_cover = library_root / "Album Artist" / "Album" / "cover.jpg"
+            self.assertEqual(2, result.success_count)
+            self.assertFalse(source_file.exists())
+            self.assertFalse(cover_file.exists())
+            self.assertTrue(target_music.exists())
+            self.assertTrue(target_cover.exists())
+            self.assertEqual(b"image", target_cover.read_bytes())
+
+    def test_apply_moves_companion_images_in_subfolder_with_music(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "library"
+            scans_dir = root / "Scans"
+            scans_dir.mkdir(parents=True)
+            source_file = root / "track01.flac"
+            cover_file = scans_dir / "cover.jpg"
+            source_file.write_bytes(b"music")
+            cover_file.write_bytes(b"image")
+            db_path = Path(tmp_dir) / "state.db"
+
+            library_root = Path(tmp_dir) / "organized"
+            _, plan_result = self._prepare_plan(root, db_path, library_root=library_root)
+
+            service = ApplyService(file_mutation_gateway=FileMutationGateway())
+            result = service.execute(
+                ApplyRequest(
+                    db_path=db_path,
+                    plan_run_id=plan_result.plan_run_id,
+                    dry_run=False,
+                )
+            )
+
+            target_music = library_root / "Album Artist" / "Album" / "01_track01.flac"
+            target_cover = library_root / "Album Artist" / "Album" / "Scans" / "cover.jpg"
+            self.assertEqual(2, result.success_count)
+            self.assertFalse(source_file.exists())
+            self.assertFalse(cover_file.exists())
+            self.assertTrue(target_music.exists())
+            self.assertTrue(target_cover.exists())
+            self.assertEqual(b"image", target_cover.read_bytes())
 
     def test_apply_skips_when_target_already_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
