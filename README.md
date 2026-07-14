@@ -19,6 +19,77 @@
 - Docker Desktop / Docker Compose
 - GUI を使う場合: ホスト側で GUI 表示が使えること
 
+## すぐ起動する
+
+Windows 側のパスが `E:\script\music_folder_builder` の場合、WSL / Linux シェルでは
+`/mnt/e/script/music_folder_builder` として開きます。
+
+```bash
+cd /mnt/e/script/music_folder_builder
+docker compose build
+docker compose run --rm app
+```
+
+コンテナのシェルが開いたら、GUI を起動します。
+
+```bash
+python -m music_folder_builder.gui
+```
+
+または:
+
+```bash
+music-folder-builder-gui
+```
+
+GUI が表示されない場合や、GUI 環境を使わずに確認したい場合は、コンテナ内で CLI を実行できます。
+
+```bash
+python -m music_folder_builder scan
+```
+
+現在のローカル設定は `config/local.toml`、Docker のマウント設定は
+`docker-compose.override.yml` を確認してください。
+
+### GUI が `couldn't connect to display ""` で起動しない場合
+
+このエラーは、コンテナ内の `DISPLAY` が空で、GUI の表示先が渡っていない状態です。
+
+まずコンテナから抜けます。
+
+```bash
+exit
+```
+
+WSL / Linux シェル側で `DISPLAY` を確認します。
+
+```bash
+echo $DISPLAY
+```
+
+何も表示されない場合は、そのシェルからは GUI 表示が使えません。WSLg が使える WSL
+ターミナルで開き直すか、X サーバーを起動してから `DISPLAY` を設定してください。
+
+`DISPLAY` に `:0` などが表示される場合は、そのシェルから起動し直します。
+
+```bash
+docker compose run --rm app
+python -m music_folder_builder.gui
+```
+
+WSLg 環境で GUI がまだ接続できない場合は、`docker-compose.override.yml` の X11
+ソケットのマウントを環境に合わせます。
+
+```yaml
+services:
+  app:
+    environment:
+      - DISPLAY=${DISPLAY}
+    volumes:
+      - /mnt/e/iTunes/iTunes Media/Music:/music:ro
+      - /mnt/wslg/.X11-unix:/tmp/.X11-unix:rw
+```
+
 ## 最初の準備
 
 `config/local.toml` はローカル専用ファイルです。Docker 用サンプルから作ってください。
@@ -127,6 +198,7 @@ GUI は次の順に使います。
 - 時刻表示は既定で JST です。必要なら `display.timezone` を変えてください。
 - 命名テンプレートでは `{track_no:02d}` のようなパディング指定と `[{track_no:02d}_]` のような条件付き表示が使えます。
 - 元のファイル名をそのまま使いたい場合は、GUI の `フォルダ名・ファイル名` タブで設定できます。
+- 画像ファイルに元のファイル名を使う設定では、同じ整理先で名前が重複した場合に `_2`, `_3` のような連番を付けます。
 - `display` や `naming` を含む設定例は `config/local.docker.toml.example` に入っています。
 
 ## コマンドラインで使う

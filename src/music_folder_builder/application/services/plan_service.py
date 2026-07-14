@@ -59,55 +59,68 @@ class PlanService:
             plan_item_rows: list[tuple[object, ...]] = []
             music_records = scan_repository.fetch_plan_records(scan_run_id=request.scan_run_id)
             source_dir_targets: dict[str, set[str]] = {}
+            music_target_groups: dict[str, list[tuple[PlannedScanRecord, PureWindowsPath, str]]] = {}
             for record in music_records:
-                item_count += 1
                 target_path = self._organization_rules.build_target_path(
                     library_root=str(request.library_root),
                     record=record,
                 )
-                sanitized_path = self._sanitizer.sanitize_path(target_path)
-                risk = self._path_policy.assess(sanitized_path)
+                sanitized_text = str(self._sanitizer.sanitize_path(target_path))
+                music_target_groups.setdefault(sanitized_text, []).append((record, target_path, sanitized_text))
 
-                action = "move"
-                conflict_status = "none"
-                risk_status = risk.status
-                reason = risk.reason
+            for group in music_target_groups.values():
+                use_duplicate_suffix = len(group) > 1 and bool(request.duplicate_suffix_template.strip())
+                for record, target_path, sanitized_text in group:
+                    if use_duplicate_suffix:
+                        target_path = self._organization_rules.build_duplicate_target_path(
+                            library_root=str(request.library_root),
+                            record=record,
+                            duplicate_suffix_template=request.duplicate_suffix_template,
+                        )
+                        sanitized_text = str(self._sanitizer.sanitize_path(target_path))
 
-                sanitized_text = str(sanitized_path)
-                if sanitized_text in seen_targets:
-                    action = "skip"
-                    conflict_status = "duplicate_target"
-                    reason = "duplicate_target_path"
-                    conflict_count += 1
-                elif risk.status != "none":
-                    action = "skip"
-                    risk_count += 1
-                else:
-                    seen_targets.add(sanitized_text)
-                    self._register_source_dir_targets(
-                        source_dir_targets=source_dir_targets,
-                        source_path=PureWindowsPath(record.source_path),
-                        source_root=PureWindowsPath(record.source_root),
-                        target_path=PureWindowsPath(sanitized_text),
+                    item_count += 1
+                    risk = self._path_policy.assess(PureWindowsPath(sanitized_text))
+
+                    action = "move"
+                    conflict_status = "none"
+                    risk_status = risk.status
+                    reason = risk.reason
+
+                    if sanitized_text in seen_targets:
+                        action = "skip"
+                        conflict_status = "duplicate_target"
+                        reason = "duplicate_target_path"
+                        conflict_count += 1
+                    elif risk.status != "none":
+                        action = "skip"
+                        risk_count += 1
+                    else:
+                        seen_targets.add(sanitized_text)
+                        self._register_source_dir_targets(
+                            source_dir_targets=source_dir_targets,
+                            source_path=PureWindowsPath(record.source_path),
+                            source_root=PureWindowsPath(record.source_root),
+                            target_path=PureWindowsPath(sanitized_text),
+                        )
+
+                    plan_item_rows.append(
+                        (
+                            str(uuid4()),
+                            plan_run_id,
+                            record.file_id,
+                            action,
+                            str(target_path),
+                            sanitized_text,
+                            conflict_status,
+                            risk_status,
+                            reason,
+                        )
                     )
-
-                plan_item_rows.append(
-                    (
-                        str(uuid4()),
-                        plan_run_id,
-                        record.file_id,
-                        action,
-                        str(target_path),
-                        sanitized_text,
-                        conflict_status,
-                        risk_status,
-                        reason,
-                    )
-                )
-                if len(plan_item_rows) >= self._batch_size:
-                    plan_repository.insert_plan_items_batch(rows=plan_item_rows)
-                    connection.commit()
-                    plan_item_rows.clear()
+                    if len(plan_item_rows) >= self._batch_size:
+                        plan_repository.insert_plan_items_batch(rows=plan_item_rows)
+                        connection.commit()
+                        plan_item_rows.clear()
 
             companion_assets = scan_repository.fetch_companion_asset_records(
                 scan_run_id=request.scan_run_id,
@@ -133,17 +146,47 @@ class PlanService:
                     target_path = None
                     sanitized_text = None
                 elif len(candidate_target_dirs) > 1:
-                    action = "skip"
-                    risk_status = "companion_target_ambiguous"
-                    reason = "companion_target_ambiguous"
-                    risk_count += 1
-                    target_path = None
-                    sanitized_text = None
+                    target_dir = (
+                        self._resolve_common_companion_target_dir(
+                            candidate_target_dirs=candidate_target_dirs,
+                            library_root=PureWindowsPath(request.library_root),
+                        )
+                        if request.use_source_image_filename
+                        else None
+                    )
+                    if target_dir is None:
+                        action = "skip"
+                        risk_status = "companion_target_ambiguous"
+                        reason = "companion_target_ambiguous"
+                        risk_count += 1
+                        target_path = None
+                        sanitized_text = None
+                    else:
+                        relative_path = PureWindowsPath(asset.source_path).relative_to(anchor)
+                        target_path = str(target_dir / relative_path)
+                        target_path, sanitized_text = self._build_unique_companion_target_path(
+                            target_path=PureWindowsPath(target_path),
+                            seen_targets=seen_targets,
+                        )
+                        risk = self._path_policy.assess(PureWindowsPath(sanitized_text))
+                        risk_status = risk.status
+                        reason = risk.reason
+                        if risk.status != "none":
+                            action = "skip"
+                            risk_count += 1
+                        else:
+                            seen_targets.add(sanitized_text)
                 else:
                     target_dir = PureWindowsPath(next(iter(candidate_target_dirs)))
                     relative_path = PureWindowsPath(asset.source_path).relative_to(anchor)
                     target_path = str(target_dir / relative_path)
-                    sanitized_text = str(self._sanitizer.sanitize_path(PureWindowsPath(target_path)))
+                    if request.use_source_image_filename:
+                        target_path, sanitized_text = self._build_unique_companion_target_path(
+                            target_path=PureWindowsPath(target_path),
+                            seen_targets=seen_targets,
+                        )
+                    else:
+                        sanitized_text = str(self._sanitizer.sanitize_path(PureWindowsPath(target_path)))
                     risk = self._path_policy.assess(PureWindowsPath(sanitized_text))
                     risk_status = risk.status
                     reason = risk.reason
@@ -229,6 +272,43 @@ class PlanService:
             if parent == current:
                 return None
             current = parent
+
+    def _resolve_common_companion_target_dir(
+        self,
+        *,
+        candidate_target_dirs: set[str],
+        library_root: PureWindowsPath,
+    ) -> PureWindowsPath | None:
+        candidate_parts = [PureWindowsPath(target_dir).parts for target_dir in candidate_target_dirs]
+        if not candidate_parts:
+            return None
+
+        common_parts: list[str] = []
+        for parts_group in zip(*candidate_parts, strict=False):
+            first_part = parts_group[0]
+            if all(part == first_part for part in parts_group):
+                common_parts.append(first_part)
+                continue
+            break
+
+        if len(common_parts) <= len(library_root.parts):
+            return None
+        return PureWindowsPath(*common_parts)
+
+    def _build_unique_companion_target_path(
+        self,
+        *,
+        target_path: PureWindowsPath,
+        seen_targets: set[str],
+    ) -> tuple[str, str]:
+        candidate = target_path
+        counter = 2
+        while True:
+            sanitized_text = str(self._sanitizer.sanitize_path(candidate))
+            if sanitized_text not in seen_targets:
+                return str(candidate), sanitized_text
+            candidate = target_path.with_name(f"{target_path.stem}_{counter}{target_path.suffix}")
+            counter += 1
 
 
 def _utc_now() -> str:

@@ -24,6 +24,32 @@ class OrganizationRules:
         self._filename_template = filename_template
 
     def build_target_path(self, *, library_root: str, record: PlannedScanRecord) -> PureWindowsPath:
+        values = self._build_values(record)
+        filename = self._render_template(self._filename_template, values).strip()
+        if not filename:
+            filename = f"{values['title']}{record.extension}"
+        return self._build_path(library_root=library_root, values=values, filename=filename)
+
+    def build_duplicate_target_path(
+        self,
+        *,
+        library_root: str,
+        record: PlannedScanRecord,
+        duplicate_suffix_template: str,
+    ) -> PureWindowsPath:
+        values = self._build_values(record)
+        filename = self._render_template(self._filename_template, values).strip()
+        if not filename:
+            filename = f"{values['title']}{record.extension}"
+
+        suffix = self._render_template(duplicate_suffix_template, values).strip()
+        if suffix:
+            filename_path = PureWindowsPath(filename)
+            filename = f"{filename_path.stem}{suffix}{filename_path.suffix}"
+
+        return self._build_path(library_root=library_root, values=values, filename=filename)
+
+    def _build_values(self, record: PlannedScanRecord) -> dict[str, object | None]:
         values = {
             "artist": record.artist or "Unknown Artist",
             "album_artist": record.album_artist or record.artist or "Unknown Artist",
@@ -35,13 +61,18 @@ class OrganizationRules:
             "year": None,
             "extension": record.extension,
         }
+        return values
 
+    def _build_path(
+        self,
+        *,
+        library_root: str,
+        values: dict[str, object | None],
+        filename: str,
+    ) -> PureWindowsPath:
         artist_dir = self._render_template(self._artist_dir_template, values).strip() or "Unknown Artist"
         album_dir = self._render_template(self._album_dir_template, values).strip() or "Unknown Album"
         disc_dir = self._render_template(self._disc_dir_template, values).strip()
-        filename = self._render_template(self._filename_template, values).strip()
-        if not filename:
-            filename = f"{values['title']}{record.extension}"
 
         path = PureWindowsPath(library_root) / artist_dir / album_dir
         if disc_dir:

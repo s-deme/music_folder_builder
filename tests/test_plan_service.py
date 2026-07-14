@@ -116,6 +116,60 @@ class PlanServiceTests(unittest.TestCase):
                 self.assertEqual("duplicate_target", conflict_rows[0]["conflict_status"])
                 self.assertEqual("duplicate_target_path", conflict_rows[0]["reason"])
 
+    def test_plan_adds_suffix_template_only_for_duplicate_music_targets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "library"
+            root.mkdir()
+            (root / "track01.flac").write_bytes(b"music")
+            (root / "track02.flac").write_bytes(b"music")
+            (root / "track03.flac").write_bytes(b"music")
+            db_path = Path(tmp_dir) / "state.db"
+
+            scan_service = ScanService(
+                metadata_reader=PlanMetadataReader(
+                    {
+                        "track01.flac": {"title": "Same Song", "track_no": 1, "disc_no": 1},
+                        "track02.flac": {"title": "Same Song", "track_no": 1, "disc_no": 1},
+                        "track03.flac": {"title": "Other Song", "track_no": 3, "disc_no": 1},
+                    }
+                )
+            )
+            scan_result = scan_service.execute(request=self._scan_request(root, db_path))
+
+            service = PlanService()
+            result = service.execute(
+                PlanRequest(
+                    db_path=db_path,
+                    scan_run_id=scan_result.scan_run_id,
+                    library_root=Path("D:/Music"),
+                    duplicate_suffix_template="_{source_stem}",
+                )
+            )
+
+            self.assertEqual(3, result.item_count)
+            self.assertEqual(0, result.conflict_count)
+
+            with connect_sqlite(db_path) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT f.source_path, p.action, p.target_path_sanitized, p.conflict_status
+                    FROM plan_items AS p
+                    JOIN scanned_files AS f ON f.id = p.file_id
+                    WHERE p.plan_run_id = ?
+                    ORDER BY f.source_path
+                    """,
+                    (result.plan_run_id,),
+                ).fetchall()
+                self.assertEqual("move", rows[0]["action"])
+                self.assertEqual(r"D:\Music\Album Artist\Album\01\01_Same Song_track01.flac", rows[0]["target_path_sanitized"])
+                self.assertEqual("none", rows[0]["conflict_status"])
+                self.assertEqual("move", rows[1]["action"])
+                self.assertEqual(r"D:\Music\Album Artist\Album\01\01_Same Song_track02.flac", rows[1]["target_path_sanitized"])
+                self.assertEqual("none", rows[1]["conflict_status"])
+                self.assertEqual("move", rows[2]["action"])
+                self.assertEqual(r"D:\Music\Album Artist\Album\01\03_Other Song.flac", rows[2]["target_path_sanitized"])
+                self.assertEqual("none", rows[2]["conflict_status"])
+
     def test_plan_marks_long_path_as_risk(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "library"
@@ -364,6 +418,155 @@ class PlanServiceTests(unittest.TestCase):
                     r"D:\Music\Album Artist\Album\01\Scans\original\cover.jpg",
                     row["target_path_sanitized"],
                 )
+
+    def test_plan_marks_duplicate_companion_image_target_as_conflict_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "library"
+            disc1_dir = root / "disc1"
+            disc2_dir = root / "disc2"
+            disc1_dir.mkdir(parents=True)
+            disc2_dir.mkdir(parents=True)
+            (disc1_dir / "track01.flac").write_bytes(b"music")
+            (disc1_dir / "cover.jpg").write_bytes(b"image")
+            (disc2_dir / "track02.flac").write_bytes(b"music")
+            (disc2_dir / "cover.jpg").write_bytes(b"image")
+            db_path = Path(tmp_dir) / "state.db"
+
+            scan_service = ScanService(
+                metadata_reader=PlanMetadataReader(
+                    {
+                        "track01.flac": {"title": "Song 1", "track_no": 1, "disc_no": None},
+                        "track02.flac": {"title": "Song 2", "track_no": 2, "disc_no": None},
+                    }
+                )
+            )
+            scan_result = scan_service.execute(request=self._scan_request(root, db_path))
+
+            service = PlanService(organization_rules=OrganizationRules(disc_dir_template=""))
+            result = service.execute(
+                PlanRequest(db_path=db_path, scan_run_id=scan_result.scan_run_id, library_root=Path("D:/Music"))
+            )
+
+            self.assertEqual(4, result.item_count)
+            self.assertEqual(1, result.conflict_count)
+
+            with connect_sqlite(db_path) as connection:
+                row = connection.execute(
+                    """
+                    SELECT p.action, p.conflict_status, p.reason
+                    FROM plan_items AS p
+                    JOIN scanned_files AS f ON f.id = p.file_id
+                    WHERE p.plan_run_id = ? AND f.source_path = ?
+                    """,
+                    (result.plan_run_id, str(disc2_dir / "cover.jpg")),
+                ).fetchone()
+                self.assertEqual("skip", row["action"])
+                self.assertEqual("duplicate_target", row["conflict_status"])
+                self.assertEqual("duplicate_target_path", row["reason"])
+
+    def test_plan_numbers_duplicate_companion_image_target_when_using_source_image_filename(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "library"
+            disc1_dir = root / "disc1"
+            disc2_dir = root / "disc2"
+            disc1_dir.mkdir(parents=True)
+            disc2_dir.mkdir(parents=True)
+            (disc1_dir / "track01.flac").write_bytes(b"music")
+            (disc1_dir / "cover.jpg").write_bytes(b"image")
+            (disc2_dir / "track02.flac").write_bytes(b"music")
+            (disc2_dir / "cover.jpg").write_bytes(b"image")
+            db_path = Path(tmp_dir) / "state.db"
+
+            scan_service = ScanService(
+                metadata_reader=PlanMetadataReader(
+                    {
+                        "track01.flac": {"title": "Song 1", "track_no": 1, "disc_no": None},
+                        "track02.flac": {"title": "Song 2", "track_no": 2, "disc_no": None},
+                    }
+                )
+            )
+            scan_result = scan_service.execute(request=self._scan_request(root, db_path))
+
+            service = PlanService(organization_rules=OrganizationRules(disc_dir_template=""))
+            result = service.execute(
+                PlanRequest(
+                    db_path=db_path,
+                    scan_run_id=scan_result.scan_run_id,
+                    library_root=Path("D:/Music"),
+                    use_source_image_filename=True,
+                )
+            )
+
+            self.assertEqual(4, result.item_count)
+            self.assertEqual(0, result.conflict_count)
+
+            with connect_sqlite(db_path) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT f.source_path, p.action, p.target_path_sanitized, p.conflict_status
+                    FROM plan_items AS p
+                    JOIN scanned_files AS f ON f.id = p.file_id
+                    WHERE p.plan_run_id = ? AND f.source_path LIKE ?
+                    ORDER BY f.source_path
+                    """,
+                    (result.plan_run_id, "%.jpg"),
+                ).fetchall()
+                self.assertEqual(2, len(rows))
+                self.assertEqual("move", rows[0]["action"])
+                self.assertEqual(r"D:\Music\Album Artist\Album\cover.jpg", rows[0]["target_path_sanitized"])
+                self.assertEqual("none", rows[0]["conflict_status"])
+                self.assertEqual("move", rows[1]["action"])
+                self.assertEqual(r"D:\Music\Album Artist\Album\cover_2.jpg", rows[1]["target_path_sanitized"])
+                self.assertEqual("none", rows[1]["conflict_status"])
+
+    def test_plan_uses_common_album_dir_for_ambiguous_companion_image_when_using_source_image_filename(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "library"
+            root.mkdir()
+            (root / "track01.flac").write_bytes(b"music")
+            (root / "track02.flac").write_bytes(b"music")
+            (root / "cover.jpg").write_bytes(b"image")
+            db_path = Path(tmp_dir) / "state.db"
+
+            scan_service = ScanService(
+                metadata_reader=PlanMetadataReader(
+                    {
+                        "track01.flac": {"title": "Song 1", "track_no": 1, "disc_no": 1},
+                        "track02.flac": {"title": "Song 2", "track_no": 1, "disc_no": 2},
+                    }
+                )
+            )
+            scan_result = scan_service.execute(request=self._scan_request(root, db_path))
+
+            service = PlanService()
+            result = service.execute(
+                PlanRequest(
+                    db_path=db_path,
+                    scan_run_id=scan_result.scan_run_id,
+                    library_root=Path("D:/Music"),
+                    use_source_image_filename=True,
+                )
+            )
+
+            self.assertEqual(3, result.item_count)
+            self.assertEqual(0, result.risk_count)
+
+            with connect_sqlite(db_path) as connection:
+                row = connection.execute(
+                    """
+                    SELECT p.action, p.target_path_sanitized, p.risk_status, p.reason
+                    FROM plan_items AS p
+                    JOIN scanned_files AS f ON f.id = p.file_id
+                    WHERE p.plan_run_id = ? AND f.source_path = ?
+                    """,
+                    (result.plan_run_id, str(root / "cover.jpg")),
+                ).fetchone()
+                self.assertEqual("move", row["action"])
+                self.assertEqual(r"D:\Music\Album Artist\Album\cover.jpg", row["target_path_sanitized"])
+                self.assertEqual("none", row["risk_status"])
+                self.assertIsNone(row["reason"])
 
     @staticmethod
     def _scan_request(source_root: Path, db_path: Path):

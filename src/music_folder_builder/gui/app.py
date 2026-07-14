@@ -6,7 +6,7 @@ import threading
 import tkinter as tk
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path, PurePath
+from pathlib import Path, PureWindowsPath
 from tkinter import filedialog, messagebox, ttk
 from tkinter import font as tkfont
 from typing import Callable
@@ -114,7 +114,9 @@ class MusicFolderBuilderApp:
         self._album_dir_template_var = tk.StringVar(value="{album}")
         self._disc_dir_template_var = tk.StringVar(value="[{disc_no:02d}]")
         self._filename_template_var = tk.StringVar(value="[{track_no:02d}_]{title}{extension}")
+        self._duplicate_suffix_template_var = tk.StringVar(value="")
         self._use_source_filename_var = tk.BooleanVar(value=False)
+        self._use_source_image_filename_var = tk.BooleanVar(value=False)
         self._plan_warnings_only_var = tk.BooleanVar(value=False)
 
         self._status_var = tk.StringVar(value="待機中")
@@ -375,6 +377,13 @@ class MusicFolderBuilderApp:
             help_text="例: [{track_no:02d}_]{title}{extension} / {track_no:03d}-{title}{extension}",
             entry_attr_name="_filename_template_entry",
         )
+        self._add_naming_row(
+            form,
+            row=4,
+            label="同じ整理先の時だけ追加",
+            variable=self._duplicate_suffix_template_var,
+            help_text="例: _{source_stem} / _disc{disc_no:02d}。空欄なら同じ整理先は警告にします。",
+        )
 
         keep_name_check = ttk.Checkbutton(
             form,
@@ -382,10 +391,21 @@ class MusicFolderBuilderApp:
             variable=self._use_source_filename_var,
             command=self._update_filename_template_state,
         )
-        keep_name_check.grid(row=4, column=1, sticky="w", pady=(8, 0))
+        keep_name_check.grid(row=5, column=1, sticky="w", pady=(8, 0))
         ToolTip(
             keep_name_check,
             "ON にすると、ファイル名は整理前と同じ名前を使います。ファイル名テンプレートは無視されます。",
+        )
+
+        keep_image_name_check = ttk.Checkbutton(
+            form,
+            text="画像ファイルは元のファイル名を使う",
+            variable=self._use_source_image_filename_var,
+        )
+        keep_image_name_check.grid(row=6, column=1, sticky="w", pady=(8, 0))
+        ToolTip(
+            keep_image_name_check,
+            "ON にすると、画像ファイルは整理前と同じ名前を使います。同じ整理先で重複する場合は _2, _3 のように連番を付けます。",
         )
 
         help_label = ttk.Label(
@@ -394,11 +414,11 @@ class MusicFolderBuilderApp:
             "パディング例: {track_no:02d} / 条件付き表示: [{track_no:02d}_]",
             justify="left",
         )
-        help_label.grid(row=5, column=1, sticky="w", pady=(8, 0))
+        help_label.grid(row=7, column=1, sticky="w", pady=(8, 0))
         ToolTip(help_label, "[] で囲んだ部分は、中の値が空なら丸ごと表示されません。")
 
         save_button = ttk.Button(form, text="命名ルールを保存", command=self._save_naming_settings)
-        save_button.grid(row=6, column=1, sticky="w", pady=(12, 0))
+        save_button.grid(row=8, column=1, sticky="w", pady=(12, 0))
         ToolTip(save_button, "今の命名テンプレートを config/local.toml に保存します。")
 
     def _add_naming_row(
@@ -831,7 +851,7 @@ class MusicFolderBuilderApp:
         tree = ttk.Treeview(parent, **options)
         for key in columns:
             tree.heading(key, text=headings[key], command=lambda column=key, current_tree=tree: self._sort_tree(current_tree, column))
-            tree.column(key, width=widths.get(key, 140), anchor="w")
+            tree.column(key, width=widths.get(key, 140), anchor="w", stretch=False)
         self._attach_tree_scrollbars(parent, tree, row=row)
         return tree
 
@@ -860,7 +880,9 @@ class MusicFolderBuilderApp:
         self._filename_template_var.set(
             str(naming_config.get("filename_template", "[{track_no:02d}_]{title}{extension}"))
         )
+        self._duplicate_suffix_template_var.set(str(naming_config.get("duplicate_suffix_template", "")))
         self._use_source_filename_var.set(bool(naming_config.get("use_source_filename", False)))
+        self._use_source_image_filename_var.set(bool(naming_config.get("use_source_image_filename", False)))
         self._update_filename_template_state()
 
     def _save_basic_settings(self) -> None:
@@ -890,7 +912,9 @@ class MusicFolderBuilderApp:
             "album_dir_template": self._album_dir_template_var.get(),
             "disc_dir_template": self._disc_dir_template_var.get(),
             "filename_template": self._filename_template_var.get(),
+            "duplicate_suffix_template": self._duplicate_suffix_template_var.get(),
             "use_source_filename": self._use_source_filename_var.get(),
+            "use_source_image_filename": self._use_source_image_filename_var.get(),
         }
         save_config(self._default_config_path, config)
         self._result_var.set(f"命名ルールを保存しました: {self._default_config_path}")
@@ -1427,7 +1451,13 @@ class MusicFolderBuilderApp:
         self._run_in_background(
             "整理予定作成",
             lambda: PlanService(organization_rules=organization_rules).execute(
-                PlanRequest(db_path=db_path, scan_run_id=scan_run_id, library_root=library_root)
+                PlanRequest(
+                    db_path=db_path,
+                    scan_run_id=scan_run_id,
+                    library_root=library_root,
+                    use_source_image_filename=self._use_source_image_filename_var.get(),
+                    duplicate_suffix_template=self._duplicate_suffix_template_var.get(),
+                )
             ),
         )
 
@@ -1808,7 +1838,7 @@ class MusicFolderBuilderApp:
         if not row.target_path:
             return base_reason
         path_length = len(row.target_path)
-        longest_component = max((len(part) for part in PurePath(row.target_path).parts), default=0)
+        longest_component = max((len(part) for part in PureWindowsPath(row.target_path).parts), default=0)
         if row.reason == "path_length_exceeded":
             return f"{base_reason} ({path_length}文字)"
         if row.reason == "component_too_long":

@@ -30,6 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan_parser.add_argument("--library-root")
     plan_parser.add_argument("--max-component-length", type=int, default=80)
     plan_parser.add_argument("--max-path-length", type=int, default=240)
+    plan_parser.add_argument("--use-source-image-filename", action="store_true", default=None)
     plan_parser.set_defaults(handler=run_plan_command)
 
     apply_parser = subparsers.add_parser("apply")

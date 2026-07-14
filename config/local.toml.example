@@ -25,6 +25,8 @@ artist_dir_template = "{album_artist}"
 album_dir_template = "{album}"
 disc_dir_template = "[{disc_no:02d}]"
 filename_template = "[{track_no:02d}_]{title}{extension}"
+duplicate_suffix_template = ""
 use_source_filename = false
+use_source_image_filename = false
 
 # scan_run_id is intentionally not stored here because it changes per run.

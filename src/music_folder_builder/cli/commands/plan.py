@@ -24,6 +24,7 @@ def run_plan_command(args: Namespace, stdout: TextIO) -> int:
             db_path=Path(args.db),
             scan_run_id=args.scan_run_id,
             library_root=Path(args.library_root),
+            use_source_image_filename=bool(args.use_source_image_filename),
         )
     )
     write_output(

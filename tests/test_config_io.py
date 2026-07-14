@@ -16,7 +16,9 @@ class ConfigIoTests(unittest.TestCase):
                     "display": {"timezone": "Asia/Tokyo"},
                     "naming": {
                         "filename_template": "[{track_no:02d}_]{title}{extension}",
+                        "duplicate_suffix_template": "_{source_stem}",
                         "use_source_filename": True,
+                        "use_source_image_filename": True,
                     },
                 },
             )
@@ -29,7 +31,9 @@ class ConfigIoTests(unittest.TestCase):
                 "[{track_no:02d}_]{title}{extension}",
                 loaded["naming"]["filename_template"],
             )
+            self.assertEqual("_{source_stem}", loaded["naming"]["duplicate_suffix_template"])
             self.assertTrue(loaded["naming"]["use_source_filename"])
+            self.assertTrue(loaded["naming"]["use_source_image_filename"])
 
 
 if __name__ == "__main__":
