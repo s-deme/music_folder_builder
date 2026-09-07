@@ -3,7 +3,7 @@
 音楽ファイルをメタデータに合わせて整理するツールです。  
 基本の流れは `scan -> plan -> apply -> verify -> rollback` です。
 
-この README は利用者向けです。開発用の設計資料は `steering/` と `storage/` にあります。
+この README は利用者向けです。開発用の設計資料は `steering/` と `storage/` にあります。実装と計画文書の対応は [steering/status.ja.md](steering/status.ja.md) を参照してください。
 
 ## できること
 
@@ -16,81 +16,40 @@
 
 ## 必要なもの
 
-- Docker Desktop / Docker Compose
-- GUI を使う場合: ホスト側で GUI 表示が使えること
+- Windowsで実際に整理する場合: Python 3.11 以上（GUIにはPython付属のTkも必要）
+- Docker開発環境を使う場合のみ: Docker Desktop / Docker Compose
+- コンテナでGUIを確認する場合: ホスト側でGUI表示が使えること
 
-## すぐ起動する
+## 安全な実行環境
 
-Windows 側のパスが `E:\script\music_folder_builder` の場合、WSL / Linux シェルでは
-`/mnt/e/script/music_folder_builder` として開きます。
+実際にファイルを移動する `apply`、移動を戻す `rollback`、実ファイルを確認する `verify` はWindowsネイティブのPython環境で実行してください。現在の計画とpath policyはWindowsパスを正本としており、Docker Composeのサンプルは元ライブラリを読み取り専用で `/music` にマウントします。Linuxコンテナから `D:\...` を直接変更する構成ではありません。
 
-```bash
-cd /mnt/e/script/music_folder_builder
-docker compose build
-docker compose run --rm app
+Dockerは開発、テスト、`scan`、`plan`、GUI確認、`apply --dry-run`、`rollback --dry-run` に使えます。コンテナには整理先の書き込みマウントを追加せず、本実行を誤って行わないでください。
+
+## Windowsで使い始める
+
+PowerShellで仮想環境を作成し、プロジェクトをインストールします。GUIにはPython付属のTkが必要です。
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e .
+Copy-Item config\local.toml.example config\local.toml
 ```
 
-コンテナのシェルが開いたら、GUI を起動します。
+`config/local.toml` の `scan.source` と `plan.library_root` を実際のWindowsパスへ変更してから起動します。
 
-```bash
-python -m music_folder_builder.gui
-```
-
-または:
-
-```bash
+```powershell
 music-folder-builder-gui
 ```
 
-GUI が表示されない場合や、GUI 環境を使わずに確認したい場合は、コンテナ内で CLI を実行できます。
+CLIを使う場合も同じ設定を使います。
 
-```bash
-python -m music_folder_builder scan
+```powershell
+music-folder-builder scan
 ```
 
-現在のローカル設定は `config/local.toml`、Docker のマウント設定は
-`docker-compose.override.yml` を確認してください。
-
-### GUI が `couldn't connect to display ""` で起動しない場合
-
-このエラーは、コンテナ内の `DISPLAY` が空で、GUI の表示先が渡っていない状態です。
-
-まずコンテナから抜けます。
-
-```bash
-exit
-```
-
-WSL / Linux シェル側で `DISPLAY` を確認します。
-
-```bash
-echo $DISPLAY
-```
-
-何も表示されない場合は、そのシェルからは GUI 表示が使えません。WSLg が使える WSL
-ターミナルで開き直すか、X サーバーを起動してから `DISPLAY` を設定してください。
-
-`DISPLAY` に `:0` などが表示される場合は、そのシェルから起動し直します。
-
-```bash
-docker compose run --rm app
-python -m music_folder_builder.gui
-```
-
-WSLg 環境で GUI がまだ接続できない場合は、`docker-compose.override.yml` の X11
-ソケットのマウントを環境に合わせます。
-
-```yaml
-services:
-  app:
-    environment:
-      - DISPLAY=${DISPLAY}
-    volumes:
-      - /mnt/e/iTunes/iTunes Media/Music:/music:ro
-      - /mnt/wslg/.X11-unix:/tmp/.X11-unix:rw
-```
-
-## 最初の準備
+## Docker開発環境の準備
 
 `config/local.toml` はローカル専用ファイルです。Docker 用サンプルから作ってください。
 
@@ -107,7 +66,7 @@ cp config/local.docker.toml.example config/local.toml
 
 ```toml
 [scan]
-source = "/music/source_library"
+source = "/music"
 db = "/workspace/state.db"
 
 [plan]
@@ -148,12 +107,12 @@ services:
     environment:
       - DISPLAY=${DISPLAY}
     volumes:
-      - /path/to/your/music/source_library:/music/source_library:ro
+      - /path/to/your/music/source_library:/music:ro
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
 ```
 
 `/path/to/your/music/source_library` は実際の音楽フォルダに置き換えてください。
-この例ではコンテナ内から `/music/source_library` として見えるようになります。
+この例ではコンテナ内から `/music` として見え、`config/local.toml` の `scan.source` と一致します。`:ro` を外さず、Dockerから元ライブラリを書き換えないでください。`plan.library_root` のWindowsパスは計画確認用であり、Docker内からそのパスへ本適用しません。
 
 ## コンテナを開く
 
@@ -167,7 +126,7 @@ docker compose run --rm app
 
 ## GUI を使う
 
-コンテナ内で次を実行します。
+Windowsネイティブ環境では `music-folder-builder-gui`、コンテナ内では次を実行します。
 
 ```bash
 python -m music_folder_builder.gui
@@ -179,6 +138,8 @@ python -m music_folder_builder.gui
 music-folder-builder-gui
 ```
 
+コンテナのGUIは開発・計画確認用です。実際の整理と巻き戻しはWindowsネイティブ環境から行います。
+
 GUI は次の順に使います。
 
 1. `はじめに` で全体の流れを確認
@@ -186,8 +147,8 @@ GUI は次の順に使います。
 3. `フォルダ名・ファイル名` で整理後の名前ルールを必要に応じて変更
 4. `1. 読み取り` で元フォルダを読み取る
 5. `2. 整理予定` で整理後の配置を確認
-6. `3. 整理実行` でテスト実行または本実行し、結果確認する
-7. `4. 元に戻す` で必要な場合だけ巻き戻し
+6. `3. 整理実行` でテスト実行し、Windowsネイティブ環境では確認後に本実行する
+7. `4. 元に戻す` で必要な場合だけ巻き戻す（本実行はWindowsネイティブ環境）
 8. `ログと履歴整理` で詳細ログ確認と不要履歴の削除
 
 注意:
@@ -201,9 +162,23 @@ GUI は次の順に使います。
 - 画像ファイルに元のファイル名を使う設定では、同じ整理先で名前が重複した場合に `_2`, `_3` のような連番を付けます。
 - `display` や `naming` を含む設定例は `config/local.docker.toml.example` に入っています。
 
+### Docker GUIが `couldn't connect to display ""` で起動しない場合
+
+コンテナを終了し、WSL / Linux側で `echo $DISPLAY` を確認します。空の場合はWSLgを利用できるターミナルで開き直すか、Xサーバーを起動して `DISPLAY` を設定してください。値があるのに接続できない場合は、`docker-compose.override.yml` のX11 socketを環境に合わせます。WSLgでは通常、次のマウントを使います。
+
+```yaml
+services:
+  app:
+    environment:
+      - DISPLAY=${DISPLAY}
+    volumes:
+      - /mnt/e/iTunes/iTunes Media/Music:/music:ro
+      - /mnt/wslg/.X11-unix:/tmp/.X11-unix:rw
+```
+
 ## コマンドラインで使う
 
-GUI を使わずに CLI でも実行できます。以下もコンテナ内で実行します。
+GUIを使わずにCLIでも実行できます。次の完全なフローはWindowsネイティブ環境で実行します。Dockerでは `scan`、`plan` と、明示的な `--dry-run` までに限定します。
 
 ```bash
 python -m music_folder_builder scan
@@ -239,8 +214,8 @@ python -m music_folder_builder verify --rollback-run-id <ROLLBACK_RUN_ID>
 
 ## 開発者向け
 
-開発用のテスト実行例:
+全テストは個別モジュールを列挙せず、discoverで実行します。これによりGUI、設定I/O、package layoutのテストも含まれます。
 
 ```bash
-python -m unittest tests.test_db_schema tests.test_apply_history_repository tests.test_apply_verify_repository tests.test_rollback_verify_repository tests.test_verify_service tests.test_file_walker tests.test_scan_service tests.test_path_policy tests.test_plan_service tests.test_cli tests.test_metadata_reader tests.test_apply_service tests.test_rollback_service tests.test_gui_query_service -v
+python -m unittest discover -v
 ```

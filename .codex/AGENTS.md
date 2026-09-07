@@ -27,7 +27,7 @@ When CodeGraphMCPServer is available, agents can leverage these tools for enhanc
 | `local_search`             | @software-developer, @bug-hunter                           | GraphRAGローカル検索   |
 | `suggest_refactoring`      | @code-reviewer, @performance-optimizer                     | リファクタリング提案   |
 
-**Setup**: See `steering/tech.md` for MCP configuration.
+**Setup**: See `../steering/tech.ja.md` for the project technology context.
 
 ---
 

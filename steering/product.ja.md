@@ -1,14 +1,14 @@
 # Product Context
 
 **Project**: music_folder_builder
-**Last Updated**: 2026-03-14
+**Last Updated**: 2026-08-31
 **Version**: 1.0
 
 ---
 
 ## Product Vision
 
-**Vision Statement**: 音楽ファイル整理を、安全に再実行できる Windows CLI として提供する。
+**Vision Statement**: 音楽ファイル整理を、安全に再実行できる Windows 向け CLI / GUI として提供する。
 
 メタデータを元に音楽ライブラリを整理したいユーザーは多い一方で、直接移動を実行するツールは誤整理や衝突でライブラリを壊しやすい。このプロジェクトは、実行前に結果を確認でき、実行後も追跡と巻き戻しができる整理ツールを提供する。
 
@@ -22,7 +22,7 @@
 
 ### What is music_folder_builder?
 
-`music_folder_builder` は、音楽ファイルの埋め込みメタデータや外部メタデータを参照し、ルールに基づいてフォルダ構成と保存場所を決定する Windows 向け CLI ツールである。
+`music_folder_builder` は、音楽ファイルの埋め込みメタデータを参照し、ルールに基づいてフォルダ構成と保存場所を決定する Windows 向け CLI / GUI ツールである。
 
 このツールは、いきなりファイルを移動しない。まず走査して状態を保存し、次に移動計画を作り、その計画を確認した上で適用する。適用後は整合性を検証し、必要に応じて巻き戻せる構成を基本とする。
 
@@ -36,7 +36,7 @@ Windows では特に、予約名、禁止文字、長いパス、reparse point �
 
 このプロジェクトは、整理処理を段階に分けて内部状態を保存する。走査結果、移動計画、適用履歴、検証結果を追跡可能にすることで、再実行性、説明可能性、ロールバック性を確保する。
 
-加えて、Windows 固有のファイルシステム制約を最初から設計に含めることで、現実の音楽ライブラリに対して安全に使える CLI を目指す。
+加えて、Windows 固有のファイルシステム制約を最初から設計に含めることで、現実の音楽ライブラリに対して安全に使える CLI / GUI を目指す。
 
 ---
 
@@ -63,13 +63,15 @@ Windows では特に、予約名、禁止文字、長いパス、reparse point �
 ### Secondary Users
 
 - **メタデータ整備ツール利用者**: 既存のメタデータ正規化結果を整理処理に渡したいユーザー
-- **将来の GUI 利用者**: 将来的に CLI 以外のインターフェースから同じコア機能を使いたいユーザー
+- **GUI 利用者**: コマンドを手入力せず、設定、進捗、履歴、ログを確認したいユーザー
 
 ---
 
 ## Core Product Capabilities
 
-### Must-Have Features (MVP)
+### 実装済みの主要機能
+
+この一覧はソース上の機能有無を示す。実データでの動作確認や受け入れ完了を示すものではない。
 
 1. **Scan**
    - **Description**: 対象フォルダを走査し、ファイル情報とメタデータを保存する
@@ -91,26 +93,29 @@ Windows では特に、予約名、禁止文字、長いパス、reparse point �
    - **User Value**: 実行後の安心感を得られる
    - **Priority**: P0
 
-### High-Priority Features (Post-MVP)
-
 5. **Rollback**
    - **Description**: 直前の実行履歴を元に逆方向の操作を行う
    - **User Value**: 誤整理時に戻せる
-   - **Priority**: P1
+   - **Priority**: P0
 
-6. **Doctor**
+6. **GUI**
+   - **Description**: 設定、段階型ワークフロー、進捗、履歴、ログをデスクトップ画面から操作する
+   - **User Value**: CLI の実行 ID と状態を画面から確認できる
+   - **Priority**: P0
+
+### Future Features (Roadmap)
+
+7. **Doctor**
    - **Description**: 長パス、権限、禁止文字、リンク追跡設定などを事前診断する
    - **User Value**: 本番実行前に危険状態を把握できる
    - **Priority**: P1
 
-### Future Features (Roadmap)
-
-7. **External Metadata Integration**
+8. **External Metadata Integration**
    - **Description**: 外部 SQLite や JSONL から正規化済みメタデータを読み込む
    - **User Value**: 既存ツール群と疎結合で連携できる
    - **Priority**: P2
 
-8. **Profile-Based Rules**
+9. **Profile-Based Rules**
    - **Description**: 複数の整理ルールプロファイルを切り替える
    - **User Value**: 用途別に整理方針を使い分けられる
    - **Priority**: P2

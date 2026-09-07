@@ -1,14 +1,14 @@
 # Technology Stack
 
 **Project**: music_folder_builder
-**Last Updated**: 2026-03-14
+**Last Updated**: 2026-08-31
 **Version**: 1.0
 
 ---
 
 ## Overview
 
-Windows CLI で動作する音楽ファイル整理ツールを Python で実装する。安全なファイル整理のため、内部状態は SQLite に保存し、処理は段階型ワークフローで進める。
+Windows の CLI と Tk GUI で動作する音楽ファイル整理ツールを Python で実装する。安全なファイル整理のため、内部状態は SQLite に保存し、処理は段階型ワークフローで進める。
 
 ---
 
@@ -25,7 +25,9 @@ Windows CLI で動作する音楽ファイル整理ツールを Python で実装
 | Technology | Role | Notes |
 |-----------|------|-------|
 | `pyproject.toml` | Project metadata and dependency management | 単一パッケージ構成 |
-| Docker | Development environment | Node 系の MUSUBI 利用と Python 開発環境の共存に使う |
+| Tkinter | Desktop GUI | Python 付属の Tk を使用する |
+| Mutagen `>=1.47,<2` | Embedded metadata reader | `pyproject.toml` で実行時依存として固定する |
+| Docker | Development environment | 開発、テスト、読み取り、dry-run、GUI確認に使う。本番のファイル移動はWindowsネイティブで行う |
 
 ### Persistence and Data
 
@@ -58,22 +60,23 @@ Windows CLI で動作する音楽ファイル整理ツールを Python で実装
 ## Expected Core Modules
 
 - `cli`: サブコマンド、引数、終了コード、表示
-- `application.services`: `scan`, `plan`, `apply`, `verify`, `rollback`, `doctor`
+- `application.services`: `scan`, `plan`, `apply`, `verify`, `rollback`
 - `domain.models`: トラック、移動計画、ルール、操作結果
 - `domain.policies`: 命名規則、衝突解決、メタデータ解釈、パス長制御
 - `infrastructure.fs`: walker、mover、path sanitizer
 - `infrastructure.db`: SQLite 接続、リポジトリ、将来の migration
 - `infrastructure.metadata`: 埋め込みタグや外部メタデータの読み取り
 - `infrastructure.logging`: CLI とは分離した操作ログ
+- `gui`: Tkinter による設定、実行、履歴、ログの画面
 
 ---
 
 ## Dependency Guidance
 
-現時点では依存を固定しすぎない。次の方針だけを採用する。
+依存は `pyproject.toml` を正本とし、次の方針を採用する。
 
 - CLI フレームワークは、標準ライブラリか軽量な選択肢を優先する
-- メタデータ読み取りライブラリは requirements/design で選定する
+- 埋め込みメタデータの読み取りには Mutagen を使う
 - ハッシュアルゴリズムは要件次第で決める
 - ORM は必須にしない。SQLite には薄いアクセス層を優先する
 
@@ -90,7 +93,8 @@ Windows CLI で動作する音楽ファイル整理ツールを Python で実装
 
 ### Recommended Tooling
 
-- `pytest` for test execution
+- `unittest` discovery for the complete test suite（`python -m unittest discover -v`）
+- `pytest` for optional test execution
 - `ruff` for lint / format
 - `mypy` or equivalent static checking if type complexity grows
 
@@ -119,8 +123,6 @@ Windows CLI で動作する音楽ファイル整理ツールを Python で実装
 
 以下は現時点では未確定とし、feature の要件と設計で決める。
 
-- メタデータ読み取りライブラリ
-- SQLite スキーマ詳細
 - ハッシュ方式
 - 並列化範囲
 - 外部メタデータツールとの接続形式

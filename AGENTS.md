@@ -18,16 +18,19 @@ This project uses **MUSUBI** (Ultimate Specification Driven Development).
 
 ### Project Memory
 
-- `steering/structure.md` - Architecture patterns
-- `steering/tech.md` - Technology stack
-- `steering/product.md` - Product context
+- `steering/structure.ja.md` - Architecture patterns
+- `steering/tech.ja.md` - Technology stack
+- `steering/product.ja.md` - Product context
+- `steering/status.ja.md` - Source-grounded implementation status
 - `steering/rules/constitution.md` - 9 Constitutional Articles
 
 ### Learn More
 
 - [MUSUBI Documentation](https://github.com/nahisaho/MUSUBI)
 - [Constitutional Governance](steering/rules/constitution.md)
-- [8-Stage SDD Workflow](steering/rules/workflow.md)
+- [Feature specifications](storage/specs/)
+- [Design documents](storage/design/)
+- [Task breakdowns](storage/tasks/)
 
 ---
 
