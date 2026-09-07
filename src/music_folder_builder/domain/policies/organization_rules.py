@@ -25,9 +25,7 @@ class OrganizationRules:
 
     def build_target_path(self, *, library_root: str, record: PlannedScanRecord) -> PureWindowsPath:
         values = self._build_values(record)
-        filename = self._render_template(self._filename_template, values).strip()
-        if not filename:
-            filename = f"{values['title']}{record.extension}"
+        filename = self._build_filename(values)
         return self._build_path(library_root=library_root, values=values, filename=filename)
 
     def build_duplicate_target_path(
@@ -38,9 +36,7 @@ class OrganizationRules:
         duplicate_suffix_template: str,
     ) -> PureWindowsPath:
         values = self._build_values(record)
-        filename = self._render_template(self._filename_template, values).strip()
-        if not filename:
-            filename = f"{values['title']}{record.extension}"
+        filename = self._build_filename(values)
 
         suffix = self._render_template(duplicate_suffix_template, values).strip()
         if suffix:
@@ -49,8 +45,13 @@ class OrganizationRules:
 
         return self._build_path(library_root=library_root, values=values, filename=filename)
 
+    def _build_filename(self, values: dict[str, object | None]) -> str:
+        return self._render_template(self._filename_template, values).strip() or (
+            f"{values['title']}{values['extension']}"
+        )
+
     def _build_values(self, record: PlannedScanRecord) -> dict[str, object | None]:
-        values = {
+        return {
             "artist": record.artist or "Unknown Artist",
             "album_artist": record.album_artist or record.artist or "Unknown Artist",
             "album": record.album or "Unknown Album",
@@ -61,7 +62,6 @@ class OrganizationRules:
             "year": None,
             "extension": record.extension,
         }
-        return values
 
     def _build_path(
         self,

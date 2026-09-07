@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
-from pathlib import PureWindowsPath
+from pathlib import Path, PureWindowsPath
 
+from music_folder_builder.domain.policies.companion_paths import (
+    COMPANION_IMAGE_EXTENSIONS,
+    register_source_dir_targets,
+)
 from music_folder_builder.domain.policies.path_policy import PathPolicy
 from music_folder_builder.domain.policies.path_sanitization import PathSanitizer
 from music_folder_builder.infrastructure.db.connection import connect_sqlite
@@ -73,7 +76,7 @@ class PlanItemTargetCandidate:
 
 
 class GuiQueryService:
-    _COMPANION_IMAGE_EXTENSIONS = (".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp")
+    _COMPANION_IMAGE_EXTENSIONS = COMPANION_IMAGE_EXTENSIONS
 
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = Path(db_path)
@@ -152,18 +155,7 @@ class GuiQueryService:
             """,
             (limit,),
         )
-        return [
-            RunRow(
-                run_id=row["id"],
-                status=row["status"],
-                started_at=row["started_at"],
-                finished_at=row["finished_at"],
-                primary_count=row["success_count"],
-                secondary_count=row["failed_count"],
-                detail=row["mode"],
-            )
-            for row in rows
-        ]
+        return _mutation_run_rows(rows)
 
     def list_rollback_runs(self, *, limit: int = 20) -> list[RunRow]:
         rows = self._fetchall(
@@ -182,18 +174,7 @@ class GuiQueryService:
             """,
             (limit,),
         )
-        return [
-            RunRow(
-                run_id=row["id"],
-                status=row["status"],
-                started_at=row["started_at"],
-                finished_at=row["finished_at"],
-                primary_count=row["success_count"],
-                secondary_count=row["failed_count"],
-                detail=row["mode"],
-            )
-            for row in rows
-        ]
+        return _mutation_run_rows(rows)
 
     def list_verify_runs(self, *, limit: int = 20) -> list[RunRow]:
         rows = self._fetchall(
@@ -215,18 +196,7 @@ class GuiQueryService:
             """,
             (limit,),
         )
-        return [
-            RunRow(
-                run_id=row["id"],
-                status=row["status"],
-                started_at=row["started_at"],
-                finished_at=row["finished_at"],
-                primary_count=row["success_count"],
-                secondary_count=row["failed_count"],
-                detail=row["mode"],
-            )
-            for row in rows
-        ]
+        return _mutation_run_rows(rows)
 
     def list_plan_items(
         self,
@@ -298,18 +268,7 @@ class GuiQueryService:
             query = f"{query}\nLIMIT ? OFFSET ?"
             params = (execution_run_id, limit, offset)
         rows = self._fetchall(query, params)
-        return [
-            LogRow(
-                sequence_no=row["sequence_no"],
-                source_path=row["source_path"],
-                target_path=row["target_path"],
-                action=row["performed_action"],
-                result=row["result"],
-                error_message=row["error_message"],
-                created_at=row["created_at"],
-            )
-            for row in rows
-        ]
+        return _log_rows(rows)
 
     def count_operation_logs(self, *, execution_run_id: str) -> int:
         row = self._fetchone(
@@ -330,18 +289,7 @@ class GuiQueryService:
             query = f"{query}\nLIMIT ? OFFSET ?"
             params = (rollback_run_id, limit, offset)
         rows = self._fetchall(query, params)
-        return [
-            LogRow(
-                sequence_no=row["sequence_no"],
-                source_path=row["source_path"],
-                target_path=row["target_path"],
-                action=row["performed_action"],
-                result=row["result"],
-                error_message=row["error_message"],
-                created_at=row["created_at"],
-            )
-            for row in rows
-        ]
+        return _log_rows(rows)
 
     def count_rollback_logs(self, *, rollback_run_id: str) -> int:
         row = self._fetchone(
@@ -392,19 +340,17 @@ class GuiQueryService:
         return int(row["count"]) if row is not None else 0
 
     def find_active_progress(self) -> ActiveProgress | None:
-        progress = self._find_active_scan_progress()
-        if progress is not None:
-            return progress
-        progress = self._find_active_plan_progress()
-        if progress is not None:
-            return progress
-        progress = self._find_active_execution_progress()
-        if progress is not None:
-            return progress
-        progress = self._find_active_rollback_progress()
-        if progress is not None:
-            return progress
-        return self._find_active_verify_progress()
+        for find_progress in (
+            self._find_active_scan_progress,
+            self._find_active_plan_progress,
+            self._find_active_execution_progress,
+            self._find_active_rollback_progress,
+            self._find_active_verify_progress,
+        ):
+            progress = find_progress()
+            if progress is not None:
+                return progress
+        return None
 
     def _find_active_scan_progress(self) -> ActiveProgress | None:
         row = self._fetchone(
@@ -528,48 +474,27 @@ class GuiQueryService:
                 """,
                 (plan_item["plan_run_id"], plan_item_id, sanitized_path),
             ).fetchone()
+            reason: str | None
             if duplicate_row is not None:
-                connection.execute(
-                    """
-                    UPDATE plan_items
-                    SET action = 'skip',
-                        target_path = ?,
-                        target_path_sanitized = ?,
-                        conflict_status = 'duplicate_target',
-                        risk_status = 'none',
-                        reason = 'duplicate_target_path'
-                    WHERE id = ?
-                    """,
-                    (target_path, sanitized_path, plan_item_id),
+                action, conflict_status, risk_status, reason = (
+                    "skip", "duplicate_target", "none", "duplicate_target_path"
                 )
             elif risk.status != "none":
-                connection.execute(
-                    """
-                    UPDATE plan_items
-                    SET action = 'skip',
-                        target_path = ?,
-                        target_path_sanitized = ?,
-                        conflict_status = 'none',
-                        risk_status = ?,
-                        reason = ?
-                    WHERE id = ?
-                    """,
-                    (target_path, sanitized_path, risk.status, risk.reason, plan_item_id),
+                action, conflict_status, risk_status, reason = (
+                    "skip", "none", risk.status, risk.reason
                 )
             else:
-                connection.execute(
-                    """
-                    UPDATE plan_items
-                    SET action = 'move',
-                        target_path = ?,
-                        target_path_sanitized = ?,
-                        conflict_status = 'none',
-                        risk_status = 'none',
-                        reason = NULL
-                    WHERE id = ?
-                    """,
-                    (target_path, sanitized_path, plan_item_id),
-                )
+                action, conflict_status, risk_status, reason = "move", "none", "none", None
+            connection.execute(
+                """
+                UPDATE plan_items
+                SET action = ?, target_path = ?, target_path_sanitized = ?,
+                    conflict_status = ?, risk_status = ?, reason = ?
+                WHERE id = ?
+                """,
+                (action, target_path, sanitized_path, conflict_status, risk_status, reason,
+                 plan_item_id),
+            )
             self._refresh_plan_run_counts(connection, plan_run_id=plan_item["plan_run_id"])
             connection.commit()
 
@@ -748,7 +673,7 @@ class GuiQueryService:
         ).fetchall()
         source_dir_targets: dict[str, set[str]] = {}
         for row in music_rows:
-            self._register_source_dir_targets(
+            register_source_dir_targets(
                 source_dir_targets=source_dir_targets,
                 source_path=PureWindowsPath(row["source_path"]),
                 source_root=PureWindowsPath(row["source_root"]),
@@ -782,27 +707,6 @@ class GuiQueryService:
             """,
             (conflict_count, risk_count, plan_run_id),
         )
-
-    def _register_source_dir_targets(
-        self,
-        *,
-        source_dir_targets: dict[str, set[str]],
-        source_path: PureWindowsPath,
-        source_root: PureWindowsPath,
-        target_path: PureWindowsPath,
-    ) -> None:
-        current_source = source_path.parent
-        current_target = target_path.parent
-        while True:
-            source_dir_targets.setdefault(str(current_source), set()).add(str(current_target))
-            if current_source == source_root:
-                return
-            parent_source = current_source.parent
-            parent_target = current_target.parent
-            if parent_source == current_source or parent_target == current_target:
-                return
-            current_source = parent_source
-            current_target = parent_target
 
     def _resolve_companion_anchor(
         self,
@@ -864,3 +768,33 @@ class GuiQueryService:
     def _delete_verify_run(self, connection: object, *, verify_run_id: str) -> None:
         connection.execute("DELETE FROM verify_logs WHERE verify_run_id = ?", (verify_run_id,))
         connection.execute("DELETE FROM verify_runs WHERE id = ?", (verify_run_id,))
+
+
+def _mutation_run_rows(rows: list[dict[str, object]]) -> list[RunRow]:
+    return [
+        RunRow(
+            run_id=row["id"],
+            status=row["status"],
+            started_at=row["started_at"],
+            finished_at=row["finished_at"],
+            primary_count=row["success_count"],
+            secondary_count=row["failed_count"],
+            detail=row["mode"],
+        )
+        for row in rows
+    ]
+
+
+def _log_rows(rows: list[dict[str, object]]) -> list[LogRow]:
+    return [
+        LogRow(
+            sequence_no=row["sequence_no"],
+            source_path=row["source_path"],
+            target_path=row["target_path"],
+            action=row["performed_action"],
+            result=row["result"],
+            error_message=row["error_message"],
+            created_at=row["created_at"],
+        )
+        for row in rows
+    ]

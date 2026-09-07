@@ -2,14 +2,19 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from sqlite3 import Connection
 from uuid import uuid4
 
 from music_folder_builder.application.dto.apply_request import ApplyRequest
 from music_folder_builder.application.dto.apply_result import ApplyResult
+from music_folder_builder.application.dto.mutation_result import MutationResult
 from music_folder_builder.infrastructure.db.connection import connect_sqlite
 from music_folder_builder.infrastructure.db.execution_repository import ExecutionRepository
 from music_folder_builder.infrastructure.db.operation_log_repository import OperationLogRepository
-from music_folder_builder.infrastructure.db.plan_query_repository import PlanQueryRepository
+from music_folder_builder.infrastructure.db.plan_query_repository import (
+    ApplyPlanItemRecord,
+    PlanQueryRepository,
+)
 from music_folder_builder.infrastructure.db.schema import initialize_schema
 from music_folder_builder.infrastructure.fs.mutation_gateway import FileMutationGateway
 
@@ -47,149 +52,23 @@ class ApplyService:
             )
 
             items = plan_query_repository.fetch_apply_items(plan_run_id=request.plan_run_id)
-            successful_plan_item_ids = operation_log_repository.fetch_successful_apply_plan_item_ids(
-                plan_item_ids=[item.plan_item_id for item in items]
+            successful_plan_item_ids = (
+                operation_log_repository.fetch_successful_apply_plan_item_ids(
+                    plan_item_ids=[item.plan_item_id for item in items]
+                )
             )
             operation_log_rows: list[tuple[object, ...]] = []
 
             for index, item in enumerate(items, start=1):
-                if item.action == "skip":
-                    skipped_count += 1
-                    risky_count += 1
-                    operation_log_rows.append(
-                        _operation_log_row(
-                            execution_run_id=execution_run_id,
-                            plan_item_id=item.plan_item_id,
-                            sequence_no=index,
-                            source_path=item.source_path,
-                            target_path=item.target_path,
-                            performed_action="skip",
-                            result="skipped",
-                            error_message=item.reason,
-                            source_deleted=False,
-                        )
-                    )
-                    self._flush_operation_log_batch(connection, operation_log_repository, operation_log_rows)
-                    continue
-
-                if request.dry_run:
-                    success_count += 1
-                    operation_log_rows.append(
-                        _operation_log_row(
-                            execution_run_id=execution_run_id,
-                            plan_item_id=item.plan_item_id,
-                            sequence_no=index,
-                            source_path=item.source_path,
-                            target_path=item.target_path,
-                            performed_action="dry_run",
-                            result="success",
-                            error_message=None,
-                            source_deleted=False,
-                        )
-                    )
-                    self._flush_operation_log_batch(connection, operation_log_repository, operation_log_rows)
-                    continue
-
-                if item.plan_item_id in successful_plan_item_ids:
-                    skipped_count += 1
-                    operation_log_rows.append(
-                        _operation_log_row(
-                            execution_run_id=execution_run_id,
-                            plan_item_id=item.plan_item_id,
-                            sequence_no=index,
-                            source_path=item.source_path,
-                            target_path=item.target_path,
-                            performed_action="skip",
-                            result="skipped",
-                            error_message="already_applied",
-                            source_deleted=False,
-                        )
-                    )
-                    self._flush_operation_log_batch(connection, operation_log_repository, operation_log_rows)
-                    continue
-
-                source_path = Path(item.source_path)
-                target_path = Path(item.target_path)
-
-                if not self._file_mutation_gateway.exists(source_path):
-                    failed_count += 1
-                    operation_log_rows.append(
-                        _operation_log_row(
-                            execution_run_id=execution_run_id,
-                            plan_item_id=item.plan_item_id,
-                            sequence_no=index,
-                            source_path=item.source_path,
-                            target_path=item.target_path,
-                            performed_action="move",
-                            result="failed",
-                            error_message="source_missing",
-                            source_deleted=False,
-                        )
-                    )
-                    self._flush_operation_log_batch(connection, operation_log_repository, operation_log_rows)
-                    continue
-
-                if self._file_mutation_gateway.exists(target_path):
-                    skipped_count += 1
-                    risky_count += 1
-                    operation_log_rows.append(
-                        _operation_log_row(
-                            execution_run_id=execution_run_id,
-                            plan_item_id=item.plan_item_id,
-                            sequence_no=index,
-                            source_path=item.source_path,
-                            target_path=item.target_path,
-                            performed_action="skip",
-                            result="skipped",
-                            error_message="target_already_exists",
-                            source_deleted=False,
-                        )
-                    )
-                    self._flush_operation_log_batch(connection, operation_log_repository, operation_log_rows)
-                    continue
-
-                if self._file_mutation_gateway.same_volume(source_path, target_path):
-                    self._file_mutation_gateway.move(source_path, target_path)
-                    success_count += 1
-                    operation_log_rows.append(
-                        _operation_log_row(
-                            execution_run_id=execution_run_id,
-                            plan_item_id=item.plan_item_id,
-                            sequence_no=index,
-                            source_path=item.source_path,
-                            target_path=item.target_path,
-                            performed_action="move",
-                            result="success",
-                            error_message=None,
-                            source_deleted=True,
-                        )
-                    )
-                    self._flush_operation_log_batch(connection, operation_log_repository, operation_log_rows)
-                    continue
-
-                self._file_mutation_gateway.copy(source_path, target_path)
-                if self._file_mutation_gateway.size(source_path) != self._file_mutation_gateway.size(
-                    target_path
-                ):
-                    failed_count += 1
-                    operation_log_rows.append(
-                        _operation_log_row(
-                            execution_run_id=execution_run_id,
-                            plan_item_id=item.plan_item_id,
-                            sequence_no=index,
-                            source_path=item.source_path,
-                            target_path=item.target_path,
-                            performed_action="copy",
-                            result="failed",
-                            error_message="cross_volume_verify_failed",
-                            source_deleted=False,
-                        )
-                    )
-                    self._flush_operation_log_batch(connection, operation_log_repository, operation_log_rows)
-                    continue
-
-                self._file_mutation_gateway.delete(source_path)
-                success_count += 1
+                outcome = self._process_item(
+                    item,
+                    dry_run=request.dry_run,
+                    already_processed=item.plan_item_id in successful_plan_item_ids,
+                )
+                success_count += outcome.result == "success"
+                skipped_count += outcome.result == "skipped"
+                failed_count += outcome.result == "failed"
+                risky_count += outcome.risky
                 operation_log_rows.append(
                     _operation_log_row(
                         execution_run_id=execution_run_id,
@@ -197,15 +76,19 @@ class ApplyService:
                         sequence_no=index,
                         source_path=item.source_path,
                         target_path=item.target_path,
-                        performed_action="copy_delete",
-                        result="success",
-                        error_message=None,
-                        source_deleted=True,
+                        performed_action=outcome.performed_action,
+                        result=outcome.result,
+                        error_message=outcome.error_message,
+                        source_deleted=outcome.deleted,
                     )
                 )
-                self._flush_operation_log_batch(connection, operation_log_repository, operation_log_rows)
+                self._flush_operation_log_batch(
+                    connection, operation_log_repository, operation_log_rows
+                )
 
-            self._flush_operation_log_batch(connection, operation_log_repository, operation_log_rows, force=True)
+            self._flush_operation_log_batch(
+                connection, operation_log_repository, operation_log_rows, force=True
+            )
 
             execution_repository.complete_execution_run(
                 execution_run_id=execution_run_id,
@@ -224,9 +107,41 @@ class ApplyService:
             risky_count=risky_count,
         )
 
+    def _process_item(
+        self,
+        item: ApplyPlanItemRecord,
+        *,
+        dry_run: bool,
+        already_processed: bool,
+    ) -> MutationResult:
+        if item.action == "skip":
+            return MutationResult("skip", "skipped", item.reason, risky=True)
+        if dry_run:
+            return MutationResult("dry_run", "success")
+        if already_processed:
+            return MutationResult("skip", "skipped", "already_applied")
+
+        source_path = Path(item.source_path)
+        target_path = Path(item.target_path)
+        if not self._file_mutation_gateway.exists(source_path):
+            return MutationResult("move", "failed", "source_missing")
+        if self._file_mutation_gateway.exists(target_path):
+            return MutationResult("skip", "skipped", "target_already_exists", risky=True)
+        if self._file_mutation_gateway.same_volume(source_path, target_path):
+            self._file_mutation_gateway.move(source_path, target_path)
+            return MutationResult("move", "success", deleted=True)
+
+        self._file_mutation_gateway.copy(source_path, target_path)
+        if self._file_mutation_gateway.size(source_path) != self._file_mutation_gateway.size(
+            target_path
+        ):
+            return MutationResult("copy", "failed", "cross_volume_verify_failed")
+        self._file_mutation_gateway.delete(source_path)
+        return MutationResult("copy_delete", "success", deleted=True)
+
     def _flush_operation_log_batch(
         self,
-        connection: object,
+        connection: Connection,
         operation_log_repository: OperationLogRepository,
         rows: list[tuple[object, ...]],
         *,

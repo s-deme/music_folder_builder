@@ -6,6 +6,10 @@ from uuid import uuid4
 
 from music_folder_builder.application.dto.plan_request import PlanRequest
 from music_folder_builder.application.dto.plan_result import PlanResult
+from music_folder_builder.domain.policies.companion_paths import (
+    COMPANION_IMAGE_EXTENSIONS,
+    register_source_dir_targets,
+)
 from music_folder_builder.domain.policies.organization_rules import OrganizationRules
 from music_folder_builder.domain.policies.path_policy import PathPolicy
 from music_folder_builder.domain.policies.path_sanitization import PathSanitizer
@@ -18,7 +22,7 @@ from music_folder_builder.infrastructure.db.schema import initialize_schema
 
 class PlanService:
     _DEFAULT_BATCH_SIZE = 500
-    _COMPANION_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+    _COMPANION_IMAGE_EXTENSIONS = COMPANION_IMAGE_EXTENSIONS
 
     def __init__(
         self,
@@ -97,7 +101,7 @@ class PlanService:
                         risk_count += 1
                     else:
                         seen_targets.add(sanitized_text)
-                        self._register_source_dir_targets(
+                        register_source_dir_targets(
                             source_dir_targets=source_dir_targets,
                             source_path=PureWindowsPath(record.source_path),
                             source_root=PureWindowsPath(record.source_root),
@@ -124,7 +128,7 @@ class PlanService:
 
             companion_assets = scan_repository.fetch_companion_asset_records(
                 scan_run_id=request.scan_run_id,
-                extensions=self._COMPANION_IMAGE_EXTENSIONS,
+                extensions=set(self._COMPANION_IMAGE_EXTENSIONS),
             )
             for asset in companion_assets:
                 item_count += 1
@@ -236,27 +240,6 @@ class PlanService:
             conflict_count=conflict_count,
             risk_count=risk_count,
         )
-
-    def _register_source_dir_targets(
-        self,
-        *,
-        source_dir_targets: dict[str, set[str]],
-        source_path: PureWindowsPath,
-        source_root: PureWindowsPath,
-        target_path: PureWindowsPath,
-    ) -> None:
-        current_source = source_path.parent
-        current_target = target_path.parent
-        while True:
-            source_dir_targets.setdefault(str(current_source), set()).add(str(current_target))
-            if current_source == source_root:
-                return
-            parent_source = current_source.parent
-            parent_target = current_target.parent
-            if parent_source == current_source or parent_target == current_target:
-                return
-            current_source = parent_source
-            current_target = parent_target
 
     def _resolve_companion_anchor(
         self,

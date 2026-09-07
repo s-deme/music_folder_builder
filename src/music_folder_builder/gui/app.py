@@ -476,7 +476,7 @@ class MusicFolderBuilderApp:
         self._plan_scan_combo = ttk.Combobox(controls, textvariable=self._plan_scan_choice_var, state="readonly")
         self._plan_scan_combo.grid(row=0, column=1, sticky="ew")
         ToolTip(self._plan_scan_combo, "どの読み取り結果を元に整理予定を作るか選びます。")
-        reload_button = ttk.Button(controls, text="候補を更新", command=self._refresh_scan_candidates)
+        reload_button = ttk.Button(controls, text="候補を更新", command=self._refresh_scan_views)
         reload_button.grid(row=0, column=2, padx=(8, 0))
         ToolTip(reload_button, "読み取り履歴の候補を最新化します。")
         plan_button = ttk.Button(controls, text="整理予定を作成", command=self._start_plan)
@@ -558,7 +558,7 @@ class MusicFolderBuilderApp:
         self._apply_plan_combo = ttk.Combobox(controls, textvariable=self._apply_plan_choice_var, state="readonly")
         self._apply_plan_combo.grid(row=0, column=1, sticky="ew")
         ToolTip(self._apply_plan_combo, "どの整理予定を使うか選びます。")
-        reload_plan_button = ttk.Button(controls, text="候補を更新", command=self._refresh_plan_candidates)
+        reload_plan_button = ttk.Button(controls, text="候補を更新", command=self._refresh_plan_views)
         reload_plan_button.grid(row=0, column=2, padx=(8, 0))
         ToolTip(reload_plan_button, "整理予定の候補を最新化します。")
         test_button = ttk.Button(controls, text="整理を試す", command=lambda: self._start_apply(dry_run=True))
@@ -605,7 +605,7 @@ class MusicFolderBuilderApp:
         )
         self._rollback_execution_combo.grid(row=0, column=1, sticky="ew")
         ToolTip(self._rollback_execution_combo, "元に戻したい整理実行履歴を選びます。")
-        exec_reload = ttk.Button(controls, text="候補を更新", command=self._refresh_execution_candidates)
+        exec_reload = ttk.Button(controls, text="候補を更新", command=self._refresh_execution_views)
         exec_reload.grid(row=0, column=2, padx=(8, 0))
         ToolTip(exec_reload, "整理実行履歴の候補を最新化します。")
         test_button = ttk.Button(controls, text="元に戻す前に試す", command=lambda: self._start_rollback(dry_run=True))
@@ -750,28 +750,6 @@ class MusicFolderBuilderApp:
                 "detail": 420,
             },
             height=height,
-        )
-
-    def _create_log_tree(self, parent: ttk.Frame) -> ttk.Treeview:
-        return self._create_scrolled_tree(
-            parent,
-            columns=("seq", "source", "target", "action", "result", "error"),
-            headings={
-                "seq": "#",
-                "source": "元",
-                "target": "先",
-                "action": "処理内容",
-                "result": "結果",
-                "error": "エラー",
-            },
-            widths={
-                "seq": 70,
-                "source": 430,
-                "target": 430,
-                "action": 120,
-                "result": 100,
-                "error": 180,
-            },
         )
 
     def _create_paged_log_tree(
@@ -942,9 +920,6 @@ class MusicFolderBuilderApp:
         self._scan_choice_map = self._format_choice_map(rows, self._format_scan_choice)
         self._set_combobox_options(self._plan_scan_combo, self._plan_scan_choice_var, self._scan_choice_map)
 
-    def _refresh_scan_candidates(self) -> None:
-        self._refresh_scan_views()
-
     def _refresh_plan_views(self) -> None:
         db_path = self._db_path()
         self._clear_tree(self._plan_tree)
@@ -963,9 +938,6 @@ class MusicFolderBuilderApp:
         if selected_plan_id:
             self._refresh_plan_preview(selected_plan_id)
 
-    def _refresh_plan_candidates(self) -> None:
-        self._refresh_plan_views()
-
     def _refresh_execution_views(self) -> None:
         db_path = self._db_path()
         self._clear_tree(self._execution_tree)
@@ -983,9 +955,6 @@ class MusicFolderBuilderApp:
         )
         self._set_combobox_options(self._logs_execution_combo, self._logs_execution_choice_var, self._execution_choice_map)
 
-    def _refresh_execution_candidates(self) -> None:
-        self._refresh_execution_views()
-
     def _refresh_rollback_views(self) -> None:
         db_path = self._db_path()
         self._clear_tree(self._rollback_tree)
@@ -995,7 +964,7 @@ class MusicFolderBuilderApp:
             return
         rows = GuiQueryService(db_path).list_rollback_runs()
         self._populate_run_tree(self._rollback_tree, rows)
-        self._rollback_choice_map = self._format_choice_map(rows, self._format_rollback_choice)
+        self._rollback_choice_map = self._format_choice_map(rows, self._format_execution_choice)
         self._set_combobox_options(self._rollback_run_combo, self._rollback_run_choice_var, self._rollback_choice_map)
         self._set_combobox_options(self._logs_rollback_combo, self._logs_rollback_choice_var, self._rollback_choice_map)
 
@@ -1007,7 +976,7 @@ class MusicFolderBuilderApp:
             return
         rows = GuiQueryService(db_path).list_verify_runs()
         self._populate_run_tree(self._verify_tree, rows)
-        self._verify_choice_map = self._format_choice_map(rows, self._format_verify_choice)
+        self._verify_choice_map = self._format_choice_map(rows, self._format_execution_choice)
         self._set_combobox_options(self._logs_verify_combo, self._logs_verify_choice_var, self._verify_choice_map)
 
     def _refresh_logs_candidates(self) -> None:
@@ -1197,19 +1166,12 @@ class MusicFolderBuilderApp:
         if db_path is None or not plan_run_id:
             return []
         service = query_service or GuiQueryService(db_path)
-        if paged:
-            rows = service.list_plan_items(
-                plan_run_id=plan_run_id,
-                warnings_only=self._plan_warnings_only_var.get(),
-                limit=self._PAGE_SIZE,
-                offset=self._plan_items_paging.offset,
-            )
-        else:
-            rows = service.list_plan_items(
-                plan_run_id=plan_run_id,
-                warnings_only=self._plan_warnings_only_var.get(),
-            )
-        return rows
+        return service.list_plan_items(
+            plan_run_id=plan_run_id,
+            warnings_only=self._plan_warnings_only_var.get(),
+            limit=self._PAGE_SIZE if paged else None,
+            offset=self._plan_items_paging.offset if paged else 0,
+        )
 
     def _export_plan_items_tsv(self) -> None:
         plan_run_id = self._get_selected_tree_run_id(self._plan_tree)
@@ -1656,34 +1618,18 @@ class MusicFolderBuilderApp:
         return DeleteResult(label="確認履歴", run_id=run_id)
 
     def _refresh_views_after_delete(self, label: str) -> None:
-        if label == "読み取り履歴":
-            self._refresh_scan_views()
-            self._refresh_plan_views()
-            self._refresh_execution_views()
-            self._refresh_rollback_views()
-            self._refresh_verify_views()
-            self._refresh_log_views()
-            return
-        if label == "整理予定履歴":
-            self._refresh_plan_views()
-            self._refresh_execution_views()
-            self._refresh_rollback_views()
-            self._refresh_verify_views()
-            self._refresh_log_views()
-            return
-        if label == "整理実行履歴":
-            self._refresh_execution_views()
-            self._refresh_rollback_views()
-            self._refresh_verify_views()
-            self._refresh_log_views()
-            return
-        if label == "元に戻し履歴":
-            self._refresh_rollback_views()
-            self._refresh_verify_views()
-            self._refresh_log_views()
-            return
-        if label == "確認履歴":
-            self._refresh_verify_views()
+        refresh_downstream = False
+        for run_label, refresh in (
+            ("読み取り履歴", self._refresh_scan_views),
+            ("整理予定履歴", self._refresh_plan_views),
+            ("整理実行履歴", self._refresh_execution_views),
+            ("元に戻し履歴", self._refresh_rollback_views),
+            ("確認履歴", self._refresh_verify_views),
+        ):
+            refresh_downstream = refresh_downstream or label == run_label
+            if refresh_downstream:
+                refresh()
+        if refresh_downstream:
             self._refresh_log_views()
 
     def _sync_choices_after_result(self, stage: str, result: object) -> None:
@@ -1774,12 +1720,6 @@ class MusicFolderBuilderApp:
         return f"{self._format_iso_datetime(row.started_at)} | items={row.primary_count} | warn={row.secondary_count} | {row.run_id[:8]}"
 
     def _format_execution_choice(self, row: RunRow) -> str:
-        return f"{self._format_iso_datetime(row.started_at)} | {row.detail} | ok={row.primary_count} ng={row.secondary_count} | {row.run_id[:8]}"
-
-    def _format_rollback_choice(self, row: RunRow) -> str:
-        return f"{self._format_iso_datetime(row.started_at)} | {row.detail} | ok={row.primary_count} ng={row.secondary_count} | {row.run_id[:8]}"
-
-    def _format_verify_choice(self, row: RunRow) -> str:
         return f"{self._format_iso_datetime(row.started_at)} | {row.detail} | ok={row.primary_count} ng={row.secondary_count} | {row.run_id[:8]}"
 
     @staticmethod

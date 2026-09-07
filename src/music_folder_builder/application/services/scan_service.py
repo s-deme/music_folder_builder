@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import UTC, datetime
-from pathlib import Path
 from uuid import uuid4
 
 from music_folder_builder.application.dto.scan_request import ScanRequest
@@ -12,7 +10,7 @@ from music_folder_builder.infrastructure.db.run_repository import RunRepository
 from music_folder_builder.infrastructure.db.scan_repository import ScanRepository
 from music_folder_builder.infrastructure.db.schema import initialize_schema
 from music_folder_builder.infrastructure.fs.walker import FileWalker
-from music_folder_builder.infrastructure.metadata.reader import MetadataReadResult, MetadataReader
+from music_folder_builder.infrastructure.metadata.reader import MetadataReader, MetadataReadResult
 
 
 class ScanService:

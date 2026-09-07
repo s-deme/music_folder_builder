@@ -7,7 +7,9 @@ from music_folder_builder.application.dto.verify_request import VerifyRequest
 from music_folder_builder.application.dto.verify_result import VerifyResult
 from music_folder_builder.infrastructure.db.apply_verify_repository import ApplyVerifyRepository
 from music_folder_builder.infrastructure.db.connection import connect_sqlite
-from music_folder_builder.infrastructure.db.rollback_verify_repository import RollbackVerifyRepository
+from music_folder_builder.infrastructure.db.rollback_verify_repository import (
+    RollbackVerifyRepository,
+)
 from music_folder_builder.infrastructure.db.schema import initialize_schema
 from music_folder_builder.infrastructure.db.verify_log_repository import VerifyLogRepository
 from music_folder_builder.infrastructure.db.verify_run_repository import VerifyRunRepository
@@ -71,24 +73,17 @@ class VerifyService:
                         source_size=source_size,
                         target_size=target_size,
                     )
-                    if target_exists and (not item.source_deleted or not source_exists):
-                        if (
-                            source_exists
-                            and source_size is not None
-                            and target_size is not None
-                            and source_size != target_size
-                        ):
-                            failed_count += 1
-                            result = "failed"
-                            error_message = "size_mismatch"
-                        else:
-                            success_count += 1
-                            result = "success"
-                            error_message = None
-                    else:
-                        failed_count += 1
-                        result = "failed"
-                        error_message = "apply_expectation_mismatch"
+                    error_message = _expectation_error(
+                        primary_exists=target_exists,
+                        counterpart_exists=source_exists,
+                        counterpart_deleted=item.source_deleted,
+                        source_size=source_size,
+                        target_size=target_size,
+                        mismatch_reason="apply_expectation_mismatch",
+                    )
+                    result = "success" if error_message is None else "failed"
+                    success_count += result == "success"
+                    failed_count += result == "failed"
                     verify_log_rows.append(
                         _verify_log_row(
                             verify_run_id=verify_run_id,
@@ -124,24 +119,17 @@ class VerifyService:
                         source_size=source_size,
                         target_size=target_size,
                     )
-                    if source_exists and (not item.target_deleted or not target_exists):
-                        if (
-                            target_exists
-                            and source_size is not None
-                            and target_size is not None
-                            and source_size != target_size
-                        ):
-                            failed_count += 1
-                            result = "failed"
-                            error_message = "size_mismatch"
-                        else:
-                            success_count += 1
-                            result = "success"
-                            error_message = None
-                    else:
-                        failed_count += 1
-                        result = "failed"
-                        error_message = "rollback_expectation_mismatch"
+                    error_message = _expectation_error(
+                        primary_exists=source_exists,
+                        counterpart_exists=target_exists,
+                        counterpart_deleted=item.target_deleted,
+                        source_size=source_size,
+                        target_size=target_size,
+                        mismatch_reason="rollback_expectation_mismatch",
+                    )
+                    result = "success" if error_message is None else "failed"
+                    success_count += result == "success"
+                    failed_count += result == "failed"
                     verify_log_rows.append(
                         _verify_log_row(
                             verify_run_id=verify_run_id,
@@ -256,3 +244,24 @@ def _verify_log_row(
         error_message,
         _utc_now(),
     )
+
+
+def _expectation_error(
+    *,
+    primary_exists: bool,
+    counterpart_exists: bool,
+    counterpart_deleted: bool,
+    source_size: int | None,
+    target_size: int | None,
+    mismatch_reason: str,
+) -> str | None:
+    if not primary_exists or (counterpart_deleted and counterpart_exists):
+        return mismatch_reason
+    if (
+        counterpart_exists
+        and source_size is not None
+        and target_size is not None
+        and source_size != target_size
+    ):
+        return "size_mismatch"
+    return None
