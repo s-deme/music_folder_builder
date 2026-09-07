@@ -40,6 +40,25 @@ class RecordingGateway(FileMutationGateway):
 
 
 class RefactoringTests(unittest.TestCase):
+    def test_optional_template_blocks_preserve_replacement_order(self):
+        # REQ-LSP-008: retain configured templates and missing-field behavior.
+        from music_folder_builder.domain.policies.organization_rules import OrganizationRules
+
+        rules = OrganizationRules()
+        values = {"track_no": 3, "title": "Song", "extension": ".flac"}
+        for template, expected in (
+            ("", ""),
+            ("{title}{extension}", "Song.flac"),
+            ("[{track_no:02d}_][{missing}_]{title}{extension}", "03_Song.flac"),
+            ("[literal]{title}", "Song"),
+            ("[outer[{track_no}]suffix]{title}", "Song"),
+            ("[[{track_no}]{title}]", "3Song"),
+            ("[{missing}]{title}", "Song"),
+            ("[{track_no}_{title}", "[3_Song"),
+        ):
+            with self.subTest(template=template):
+                self.assertEqual(expected, rules._render_template(template, values))
+
     def test_verify_expectation_matrix(self):
         from music_folder_builder.application.services.verify_service import _expectation_error
 

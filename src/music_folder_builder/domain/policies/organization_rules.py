@@ -81,10 +81,7 @@ class OrganizationRules:
 
     def _render_template(self, template: str, values: dict[str, object | None]) -> str:
         rendered = template
-        while True:
-            match = self._OPTIONAL_BLOCK_PATTERN.search(rendered)
-            if match is None:
-                break
+        while (match := self._OPTIONAL_BLOCK_PATTERN.search(rendered)) is not None:
             block_text = match.group(1)
             block_rendered, used_value = self._render_fields(block_text, values)
             replacement = block_rendered if used_value else ""
