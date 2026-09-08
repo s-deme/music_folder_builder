@@ -76,8 +76,7 @@ music_folder_builder/
 ├── config/
 ├── storage/
 │   ├── specs/
-│   ├── design/
-│   └── tasks/
+│   └── design/
 └── steering/
 ```
 
@@ -113,7 +112,7 @@ CLI は現在、次のサブコマンドを持つ。
 ## Persistence Boundaries
 
 - 走査結果、計画、実行履歴、操作ログは SQLite に保存する
-- SDD 文書は `storage/` 配下に保存する
+- 開発に必要な要件と技術設計は `storage/specs/` と `storage/design/` に保存する
 - ログは機械可読性を意識し、CLI 表示とは分離する
 
 SQLite の具体スキーマは `src/music_folder_builder/infrastructure/db/schema.py` と `storage/design/` の各設計文書で管理する。
