@@ -111,3 +111,31 @@ class PathSecurityTests(unittest.TestCase):
             assert sentinel.read_bytes() == b"keep"
         finally:
             junction.rmdir()
+
+
+    @unittest.skipUnless(os.name == "nt", "Windows symbolic links")
+    def test_symbolic_links_are_rejected_without_touching_target(self):
+        root = self.tmp_path / "root"
+        outside = self.tmp_path / "outside"
+        root.mkdir(); outside.mkdir()
+        sentinel = outside / "sentinel.flac"
+        sentinel.write_bytes(b"keep")
+        directory_link = root / "directory-link"
+        file_link = root / "file-link.flac"
+        try:
+            directory_link.symlink_to(outside, target_is_directory=True)
+            file_link.symlink_to(sentinel)
+        except OSError as error:
+            if os.environ.get("SECURITY_REQUIRE_SYMLINK") == "1":
+                raise
+            self.skipTest(f"Symbolic-link creation is unavailable: {error}")
+        finally:
+            self.addCleanup(lambda: directory_link.unlink(missing_ok=True))
+            self.addCleanup(lambda: file_link.unlink(missing_ok=True))
+        for link in [directory_link / sentinel.name, file_link]:
+            with self.assertRaisesRegex(ValueError, "reparse"):
+                validate_path(link, root)
+        entries = list(FileWalker(follow_links=True).walk(root))
+        self.assertEqual(2, len(entries))
+        self.assertTrue(all(entry.file_type == "ignored" for entry in entries))
+        self.assertEqual(b"keep", sentinel.read_bytes())
