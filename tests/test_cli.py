@@ -58,8 +58,8 @@ class CliTests(unittest.TestCase):
                 "\n".join(
                     [
                         "[scan]",
-                        f'source = "{root}"',
-                        f'db = "{db_path}"',
+                        f'source = {json.dumps(str(root))}',
+                        f'db = {json.dumps(str(db_path))}',
                     ]
                 ),
                 encoding="utf-8",
@@ -120,10 +120,10 @@ class CliTests(unittest.TestCase):
                 "\n".join(
                     [
                         "[scan]",
-                        f'source = "{root}"',
-                        f'db = "{db_path}"',
+                        f'source = {json.dumps(str(root))}',
+                        f'db = {json.dumps(str(db_path))}',
                         "[plan]",
-                        f'db = "{db_path}"',
+                        f'db = {json.dumps(str(db_path))}',
                         'library_root = "D:/Music"',
                     ]
                 ),
@@ -165,13 +165,13 @@ class CliTests(unittest.TestCase):
                 "\n".join(
                     [
                         "[scan]",
-                        f'source = "{root}"',
-                        f'db = "{db_path}"',
+                        f'source = {json.dumps(str(root))}',
+                        f'db = {json.dumps(str(db_path))}',
                         "[plan]",
-                        f'db = "{db_path}"',
+                        f'db = {json.dumps(str(db_path))}',
                         'library_root = "D:/Music"',
                         "[apply]",
-                        f'db = "{db_path}"',
+                        f'db = {json.dumps(str(db_path))}',
                         "dry_run = true",
                     ]
                 ),
@@ -286,7 +286,7 @@ class CliTests(unittest.TestCase):
                 "\n".join(
                     [
                         "[rollback]",
-                        f'db = "{db_path}"',
+                        f'db = {json.dumps(str(db_path))}',
                         "dry_run = true",
                     ]
                 ),
@@ -338,7 +338,7 @@ class CliTests(unittest.TestCase):
                 "\n".join(
                     [
                         "[verify]",
-                        f'db = "{db_path}"',
+                        f'db = {json.dumps(str(db_path))}',
                         'execution_run_id = "execution-1"',
                     ]
                 ),

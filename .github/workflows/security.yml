@@ -45,12 +45,14 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python }}
-      - name: Test only temporary files, junctions, and symbolic links
+      - name: Install project dependencies
+        run: python -m pip install .
+      - name: Test complete suite using temporary files, junctions, and symbolic links
         env:
           PYTHONPATH: src
           PYTHONUTF8: '1'
           SECURITY_REQUIRE_SYMLINK: '1'
-        run: python -m unittest discover -s tests -p test_path_security.py -v
+        run: python -m unittest discover -s tests -v
 
   gate:
     name: Security gate
