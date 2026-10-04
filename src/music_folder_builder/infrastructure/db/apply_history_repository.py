@@ -13,6 +13,8 @@ class RollbackItemRecord:
     target_path: str
     performed_action: str
     result: str
+    source_root: str | None
+    target_root: str | None
 
 
 class ApplyHistoryRepository:
@@ -29,9 +31,14 @@ class ApplyHistoryRepository:
                 ol.source_path AS source_path,
                 ol.target_path AS target_path,
                 ol.performed_action AS performed_action,
-                ol.result AS result
+                ol.result AS result,
+                f.source_root AS source_root,
+                COALESCE(pr.library_root, f.source_root) AS target_root
             FROM operation_logs AS ol
             JOIN execution_runs AS er ON er.id = ol.execution_run_id
+            LEFT JOIN plan_items AS p ON p.id = ol.plan_item_id
+            LEFT JOIN scanned_files AS f ON f.id = p.file_id
+            LEFT JOIN plan_runs AS pr ON pr.id = p.plan_run_id
             WHERE ol.execution_run_id = ?
               AND er.mode = 'apply'
               AND ol.result = 'success'
@@ -49,6 +56,8 @@ class ApplyHistoryRepository:
                 target_path=row["target_path"],
                 performed_action=row["performed_action"],
                 result=row["result"],
+                source_root=row["source_root"],
+                target_root=row["target_root"],
             )
             for row in rows
         ]

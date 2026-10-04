@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Iterable
 
 from music_folder_builder.infrastructure.fs.file_info import FileInfo
+from music_folder_builder.infrastructure.fs.path_safety import is_reparse_point, validate_path
 
 
 class FileWalker:
@@ -21,17 +22,17 @@ class FileWalker:
 
     def walk(self, root: str | Path) -> Iterable[FileInfo]:
         root_path = Path(root)
+        validate_path(root_path, root_path)
 
-        for current_root, dir_names, file_names in os.walk(root_path, followlinks=self._follow_links):
+        for current_root, dir_names, file_names in os.walk(root_path, followlinks=False):
             current_path = Path(current_root)
 
-            if not self._follow_links:
-                yield from self._prune_symlink_directories(current_path, dir_names)
+            yield from self._prune_symlink_directories(current_path, dir_names)
 
             for file_name in sorted(file_names):
                 path = current_path / file_name
 
-                if path.is_symlink() and not self._follow_links:
+                if is_reparse_point(path):
                     yield FileInfo(
                         path=path,
                         extension=path.suffix.lower(),
@@ -40,6 +41,7 @@ class FileWalker:
                     )
                     continue
 
+                validate_path(path, root_path)
                 yield FileInfo(
                     path=path,
                     extension=path.suffix.lower(),
@@ -58,7 +60,7 @@ class FileWalker:
 
         for dir_name in dir_names:
             path = current_path / dir_name
-            if path.is_symlink():
+            if is_reparse_point(path):
                 symlink_directories.append(
                     FileInfo(
                         path=path,

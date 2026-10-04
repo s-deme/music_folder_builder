@@ -11,6 +11,8 @@ class ApplyPlanItemRecord:
     target_path: str
     action: str
     reason: str | None
+    source_root: str
+    target_root: str
 
 
 class PlanQueryRepository:
@@ -25,9 +27,12 @@ class PlanQueryRepository:
                 f.source_path AS source_path,
                 p.target_path_sanitized AS target_path,
                 p.action AS action,
-                p.reason AS reason
+                p.reason AS reason,
+                f.source_root AS source_root,
+                COALESCE(pr.library_root, f.source_root) AS target_root
             FROM plan_items AS p
             JOIN scanned_files AS f ON f.id = p.file_id
+            JOIN plan_runs AS pr ON pr.id = p.plan_run_id
             WHERE p.plan_run_id = ?
             ORDER BY f.source_path
             """,
@@ -40,6 +45,8 @@ class PlanQueryRepository:
                 target_path=row["target_path"],
                 action=row["action"],
                 reason=row["reason"],
+                source_root=row["source_root"],
+                target_root=row["target_root"],
             )
             for row in rows
         ]

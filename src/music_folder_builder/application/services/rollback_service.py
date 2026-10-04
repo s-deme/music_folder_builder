@@ -17,6 +17,7 @@ from music_folder_builder.infrastructure.db.rollback_log_repository import Rollb
 from music_folder_builder.infrastructure.db.rollback_run_repository import RollbackRunRepository
 from music_folder_builder.infrastructure.db.schema import initialize_schema
 from music_folder_builder.infrastructure.fs.mutation_gateway import FileMutationGateway
+from music_folder_builder.infrastructure.fs.path_safety import validate_path
 
 
 class RollbackService:
@@ -123,6 +124,13 @@ class RollbackService:
 
         source_path = Path(item.source_path)
         target_path = Path(item.target_path)
+        if not item.source_root or not item.target_root:
+            return MutationResult("skip", "failed", "plan_root_missing; regenerate the plan", risky=True)
+        try:
+            validate_path(source_path, Path(item.source_root))
+            validate_path(target_path, Path(item.target_root))
+        except (OSError, ValueError) as error:
+            return MutationResult("skip", "failed", str(error), risky=True)
         if item.performed_action not in ("move", "copy_delete"):
             return MutationResult("skip", "failed", "rollback_not_implemented")
         action = "reverse_move" if item.performed_action == "move" else "reverse_copy"
@@ -130,17 +138,25 @@ class RollbackService:
             return MutationResult(action, "failed", "target_missing")
         if self._file_mutation_gateway.exists(source_path):
             return MutationResult("skip", "skipped", "source_already_exists", risky=True)
-        if item.performed_action == "move":
-            self._file_mutation_gateway.move(target_path, source_path)
-            return MutationResult(action, "success", deleted=True)
+        try:
+            with self._file_mutation_gateway.guarded_paths(
+                target_path, source_path, Path(item.target_root), Path(item.source_root)
+            ):
+                if item.performed_action == "move":
+                    self._file_mutation_gateway.move(target_path, source_path)
+                    return MutationResult(action, "success", deleted=True)
 
-        self._file_mutation_gateway.copy(target_path, source_path)
-        if self._file_mutation_gateway.size(source_path) != self._file_mutation_gateway.size(
-            target_path
-        ):
-            return MutationResult(action, "failed", "rollback_verify_failed")
-        self._file_mutation_gateway.delete(target_path)
-        return MutationResult(action, "success", deleted=True)
+                self._file_mutation_gateway.copy(target_path, source_path)
+                if self._file_mutation_gateway.size(source_path) != self._file_mutation_gateway.size(
+                    target_path
+                ):
+                    return MutationResult(action, "failed", "rollback_verify_failed")
+                self._file_mutation_gateway.delete(target_path)
+                return MutationResult(action, "success", deleted=True)
+        except FileExistsError:
+            return MutationResult("skip", "skipped", "destination_already_exists", risky=True)
+        except (OSError, ValueError) as error:
+            return MutationResult("skip", "failed", str(error), risky=True)
 
     def _flush_rollback_log_batch(
         self,

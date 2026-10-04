@@ -392,6 +392,9 @@ class RollbackServiceTests(unittest.TestCase):
                     """,
                     row,
                 )
+            # Security boundaries must refer to this fixture's real temporary roots.
+            connection.execute("UPDATE scanned_files SET source_root = ?", (str(source_file.parent),))
+            connection.execute("UPDATE plan_runs SET library_root = ?", (str(target_file.parent),))
             connection.commit()
 
     @staticmethod
@@ -449,6 +452,9 @@ class RollbackServiceTests(unittest.TestCase):
                 """,
                 (str(source_file), str(target_file)),
             )
+            # Security boundaries must refer to this fixture's real temporary roots.
+            connection.execute("UPDATE scanned_files SET source_root = ?", (str(source_file.parent),))
+            connection.execute("UPDATE plan_runs SET library_root = ?", (str(target_file.parent),))
             connection.commit()
 
     @staticmethod
@@ -506,6 +512,9 @@ class RollbackServiceTests(unittest.TestCase):
                 """,
                 (str(source_file), str(target_file)),
             )
+            # Security boundaries must refer to this fixture's real temporary roots.
+            connection.execute("UPDATE scanned_files SET source_root = ?", (str(source_file.parent),))
+            connection.execute("UPDATE plan_runs SET library_root = ?", (str(target_file.parent),))
             connection.commit()
 
 

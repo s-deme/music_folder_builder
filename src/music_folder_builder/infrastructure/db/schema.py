@@ -183,3 +183,6 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
     with connection:
         for statement in SCHEMA_STATEMENTS:
             connection.execute(statement)
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(plan_runs)")}
+        if "library_root" not in columns:
+            connection.execute("ALTER TABLE plan_runs ADD COLUMN library_root TEXT")

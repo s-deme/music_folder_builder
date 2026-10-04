@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import contextmanager
 import unittest
 from itertools import product
 from pathlib import Path
@@ -19,6 +20,11 @@ class RecordingGateway(FileMutationGateway):
         self.same = same_volume
         self.equal = equal_sizes
         self.operations = []
+
+    @contextmanager
+    def guarded_paths(self, source, target, source_root, target_root):
+        # This fake models decisions only; native path protection has separate real-file tests.
+        yield
 
     def exists(self, path):
         return self.present[str(path)]
@@ -168,10 +174,10 @@ class RefactoringTests(unittest.TestCase):
                     )
                     connection.execute(
                         "INSERT INTO scanned_files VALUES "
-                        "('file', 'scan', 'source', '', '', 10, '', 'music', NULL, '')"
+                        "('file', 'scan', 'source', '.', '', 10, '', 'music', NULL, '')"
                     )
                     connection.execute(
-                        "INSERT INTO plan_runs VALUES ('plan', 'scan', '', NULL, '', '', 0, 0)"
+                        "INSERT INTO plan_runs VALUES ('plan', 'scan', '', NULL, '', '', 0, 0, '.')"
                     )
                     connection.execute(
                         "INSERT INTO plan_items VALUES "

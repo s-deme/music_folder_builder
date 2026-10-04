@@ -60,6 +60,11 @@ class PlanService:
                 started_at=_utc_now(),
             )
 
+            connection.execute(
+                "UPDATE plan_runs SET library_root = ? WHERE id = ?",
+                (str(request.library_root.absolute()), plan_run_id),
+            )
+
             plan_item_rows: list[tuple[object, ...]] = []
             music_records = scan_repository.fetch_plan_records(scan_run_id=request.scan_run_id)
             source_dir_targets: dict[str, set[str]] = {}

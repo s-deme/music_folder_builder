@@ -17,6 +17,7 @@ from music_folder_builder.infrastructure.db.plan_query_repository import (
 )
 from music_folder_builder.infrastructure.db.schema import initialize_schema
 from music_folder_builder.infrastructure.fs.mutation_gateway import FileMutationGateway
+from music_folder_builder.infrastructure.fs.path_safety import validate_path
 
 
 class ApplyService:
@@ -123,21 +124,36 @@ class ApplyService:
 
         source_path = Path(item.source_path)
         target_path = Path(item.target_path)
+        if not item.source_root or not item.target_root:
+            return MutationResult("skip", "failed", "plan_root_missing; regenerate the plan", risky=True)
+        try:
+            validate_path(source_path, Path(item.source_root))
+            validate_path(target_path, Path(item.target_root))
+        except (OSError, ValueError) as error:
+            return MutationResult("skip", "failed", str(error), risky=True)
         if not self._file_mutation_gateway.exists(source_path):
             return MutationResult("move", "failed", "source_missing")
         if self._file_mutation_gateway.exists(target_path):
             return MutationResult("skip", "skipped", "target_already_exists", risky=True)
-        if self._file_mutation_gateway.same_volume(source_path, target_path):
-            self._file_mutation_gateway.move(source_path, target_path)
-            return MutationResult("move", "success", deleted=True)
+        try:
+            with self._file_mutation_gateway.guarded_paths(
+                source_path, target_path, Path(item.source_root), Path(item.target_root)
+            ):
+                if self._file_mutation_gateway.same_volume(source_path, target_path):
+                    self._file_mutation_gateway.move(source_path, target_path)
+                    return MutationResult("move", "success", deleted=True)
 
-        self._file_mutation_gateway.copy(source_path, target_path)
-        if self._file_mutation_gateway.size(source_path) != self._file_mutation_gateway.size(
-            target_path
-        ):
-            return MutationResult("copy", "failed", "cross_volume_verify_failed")
-        self._file_mutation_gateway.delete(source_path)
-        return MutationResult("copy_delete", "success", deleted=True)
+                self._file_mutation_gateway.copy(source_path, target_path)
+                if self._file_mutation_gateway.size(source_path) != self._file_mutation_gateway.size(
+                    target_path
+                ):
+                    return MutationResult("copy", "failed", "cross_volume_verify_failed")
+                self._file_mutation_gateway.delete(source_path)
+                return MutationResult("copy_delete", "success", deleted=True)
+        except FileExistsError:
+            return MutationResult("skip", "skipped", "destination_already_exists", risky=True)
+        except (OSError, ValueError) as error:
+            return MutationResult("skip", "failed", str(error), risky=True)
 
     def _flush_operation_log_batch(
         self,
